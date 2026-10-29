@@ -107,3 +107,9 @@ Additional UI regression check: `node tests/design.cjs` (Playwright and Chromium
 `web/styles.css` defines the dark industrial palette; `web/scada.js` connects camera presets, thermal emphasis, visual pause, numeric PWM entry and per-motor maintenance work orders to existing telemetry and command handlers. Numeric input drafts remain untouched while focused. JSON work orders contain a unique identifier, observed readings, configured limits, variance and inspection suggestions; Print / Save PDF is local and nothing is dispatched externally.
 
 The reference's simulation-only RPM/current/load controls and 70/90°C defaults are deliberately not mapped to unsupported hardware measurements. Existing 31/34°C protection remains authoritative. Thermal mode is an illustrative emissive casing colour, not a thermal-camera measurement. PWM-based visual speed is damped and bounded at 18 rad/s; stale/stopped output stops the visualization immediately. The existing procedural model, shared motion units and hardware API remain in use. Work-order guidance does not claim ISO compliance or certified diagnosis.
+
+### Reference workspace navigation
+
+The dashboard now has separate Overview, Machines, 3D Digital Twin, Sensor Trends, Fault Alerts, Maintenance Reports and Connection & limits pages. Both demo and firmware share this shell. Select one of the two real motor channels to inspect its existing controls/model. The top bar keeps ALL STOP accessible on every page. Status counts use live validated telemetry and show unavailable counts when offline.
+
+Generated work orders can be reopened from Maintenance Reports (latest 30 in the current tab only); downloading JSON preserves a copy outside the tab. Existing condition reports remain accessible. `tests/workspace.cjs` verifies navigation, motor stop, saved order reopening and mobile width. Older UI tests that directly click now-hidden controls must navigate to the corresponding page first.

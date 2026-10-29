@@ -19,7 +19,7 @@ p=p.replace("history.push({...d,time:", "history.push({...d,mode:window.DEMO?'DE
 p=p.replace("$('address').value=location.host;", "$('address').value=location.host;")
 libs='<script>\n'+(root/'web/vendor/three.min.js').read_text()+'\n</script><script>\n'+(root/'web/motor-view.js').read_text()+'\n</script>'
 p=p.replace('<script>\n\'use strict\';',libs+'\n<!-- TRANSPORT -->\n<script>\n\'use strict\';')
-p=p.replace('</html>', '<script>\n'+(root/'web/dashboard-upgrade.js').read_text()+'\n'+(root/'web/monitoring.js').read_text()+'\n'+(root/'web/design.js').read_text()+'\n'+(root/'web/scada.js').read_text()+"\nconst scadaStyle=document.createElement('style');scadaStyle.textContent="+repr((root/'web/styles.css').read_text())+";document.head.append(scadaStyle);"+'\n</script></html>')
+p=p.replace('</html>', '<script>\n'+(root/'web/dashboard-upgrade.js').read_text()+'\n'+(root/'web/monitoring.js').read_text()+'\n'+(root/'web/design.js').read_text()+'\n'+(root/'web/scada.js').read_text()+'\n'+(root/'web/workspace.js').read_text()+"\nconst scadaStyle=document.createElement('style');scadaStyle.textContent="+repr((root/'web/styles.css').read_text())+";document.head.append(scadaStyle);"+'\n</script></html>')
 three_source=(root/'web/vendor/three.min.js').read_text()
 parts=[three_source[i:i+8192] for i in range(0,len(three_source),8192)]
 hash_value=2166136261
