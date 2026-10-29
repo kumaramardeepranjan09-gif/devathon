@@ -20,16 +20,20 @@ p=p.replace("$('address').value=location.host;", "$('address').value=location.ho
 libs='<script>\n'+(root/'web/vendor/three.min.js').read_text()+'\n</script><script>\n'+(root/'web/motor-view.js').read_text()+'\n</script>'
 p=p.replace('<script>\n\'use strict\';',libs+'\n<!-- TRANSPORT -->\n<script>\n\'use strict\';')
 p=p.replace('</html>', '<script>\n'+(root/'web/dashboard-upgrade.js').read_text()+'\n'+(root/'web/monitoring.js').read_text()+'\n</script></html>')
-hardware=p.replace('<!-- TRANSPORT -->','')
+three_source=(root/'web/vendor/three.min.js').read_text()
+hardware=p.replace('<!-- TRANSPORT -->','').replace('<script>\n'+three_source+'\n</script>', '<script src="/three-r128.js"></script>')
 demo=p.replace('<!-- TRANSPORT -->','<script>\n'+(root/'web/demo.js').read_text()+'\n</script>')
 demo=demo.replace('SMARTPREDICT / LIVE STATION','SMARTPREDICT / DEMO STUDIO').replace('Independent temperatures · Shared motion · Local protection','SIMULATED READINGS · No ESP32 required · No hardware commands')
 demo=demo.replace('<div class="toolbar"><div><label for="address">', '<div class="toolbar"><div hidden><label for="address">')
 demo=demo.replace('<div id="message"', '<section class="card"><b>Demo scenarios</b><p>All readings below are simulated. Use scenarios to explore warnings, shutdown and reports.</p><div class="controls">'+''.join(f'<button onclick="scenario(\'{k}\')">{v}</button>' for k,v in [('healthy','Healthy / recover'),('warm1','Motor 1 warning'),('hot2','Motor 2 critical'),('motion','Shared movement'),('sensor','Sensor fault'),('offline','Disconnect')])+'</div></section><div id="message"')
 (root/'demo.html').write_text(demo)
 (root/'web/hardware.html').write_text(hardware)
-s=(root/'web/firmware.template.txt').read_text();compressed=bytearray(gzip.compress(hardware.encode(),mtime=0));compressed[9]=255
-array='const uint8_t PAGE_GZ[] PROGMEM = {\n'+ '\n'.join(','.join(str(b) for b in compressed[i:i+24])+',' for i in range(0,len(compressed),24))+'\n};'
-s=s.replace('/* EMBEDDED_DASHBOARD */',array)
-s=s.replace('server.send_P(200, "text/html", PAGE);','server.sendHeader("Content-Encoding", "gzip");\n    server.send_P(200, "text/html; charset=utf-8", (const char*)PAGE_GZ, sizeof(PAGE_GZ));')
+s=(root/'web/firmware.template.txt').read_text()
+def embed(name, content):
+    compressed=bytearray(gzip.compress(content.encode(),mtime=0));compressed[9]=255
+    return 'const uint8_t '+name+'[] PROGMEM = {\n'+'\n'.join(','.join(str(b) for b in compressed[i:i+24])+',' for i in range(0,len(compressed),24))+'\n};',len(compressed)
+page_array,page_size=embed('PAGE_GZ',hardware)
+three_array,three_size=embed('THREE_GZ',three_source)
+s=s.replace('/* EMBEDDED_DASHBOARD */',page_array+'\n'+three_array)
 (root/'SmartPredict_ESP32/SmartPredict_ESP32.ino').write_text(s)
-print(f'Built demo.html and single-file firmware; embedded page gzip = {len(compressed)} bytes')
+print(f'Built single-file firmware: HTML {page_size} bytes; cacheable Three.js {three_size} bytes')

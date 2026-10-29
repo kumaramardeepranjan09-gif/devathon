@@ -14,4 +14,4 @@ jobs:
           arduino-cli core install esp32:esp32@3.3.0 --additional-urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
           arduino-cli lib install 'OneWire@2.3.8' 'DallasTemperature@4.0.5'
           arduino-cli compile --fqbn esp32:esp32:esp32 SmartPredict_ESP32
-      - run: python3 tests/safety.py && python3 tests/runtime.py
+      - run: python3 tests/safety.py && python3 tests/runtime.py && python3 tests/transfer.py

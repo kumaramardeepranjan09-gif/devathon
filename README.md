@@ -121,3 +121,9 @@ Service lifecycle defaults to **200 hours**, configurable via `SERVICE_BUDGET_HO
 Download report records current failure/warning evidence, recorded session events, sensor status, selected-range statistics and charts. Physical root causes (bearing damage, winding faults, alignment) require inspection and cannot be inferred reliably from these sensors alone.
 
 Connection checklist: upload with motor supply off → check Serial IP → open dashboard → confirm both temperatures/MPU healthy → warm each sensor separately → compare with thermometer → verify driver stop behavior → apply safe motor power → start each motor separately → verify stop, fault and reconnect. Existing GPIO table is authoritative; screenshot pin labels were not adopted.
+
+## Dashboard transfer troubleshooting
+
+The hardware page now requests its bundled Three.js at `/three-r128.js` on the same ESP32; no internet/CDN is used. The main HTML is about 15 KB compressed. Three.js is cached by the browser, while HTML uses no-store. Both assets remain inside the single upload file. The response writer sends blocks of at most 1024 bytes, accounts for partial writes and services sensors between blocks. `tests/transfer.py` exercises short writes, stalls and disconnected clients; `tests/delivery.cjs` tests actual gzip HTTP responses and the separate asset route.
+
+After uploading, reset with motor power off, keep IMU still, open the newly printed IP and use Ctrl+Shift+R once. Check `/api` first. Serial Monitor logs `HTTP transfer complete` or `HTTP transfer interrupted` with available heap. If the board prints startup messages again, report the reset/brownout text and check power separately; a transfer fix cannot repair an unstable power source or Wi-Fi. No credential is printed by diagnostics.

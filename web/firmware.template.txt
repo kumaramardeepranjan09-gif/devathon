@@ -522,6 +522,41 @@ void handleAPI() {
 // =============== DASHBOARD =====================
 /* EMBEDDED_DASHBOARD */
 
+// Service protection between network blocks; never recursively handle HTTP.
+void serviceSensors() {
+  accountRuntime();
+  updateTemperatures();
+  unsigned long now=millis();
+  if(now-lastMPU>=100){lastMPU=now;readMPU();sampleSequence++;evaluateSafety();}
+}
+
+// NetworkClient may accept fewer bytes than requested. Advance only by bytes
+// actually written, with bounded retries and cooperative protection updates.
+bool writeAll(NetworkClient &client, const uint8_t *bytes, size_t length) {
+  size_t offset=0;
+  unsigned long lastProgress=millis();
+  while(offset<length && client.connected()) {
+    serviceSensors();
+    size_t amount=length-offset; if(amount>1024)amount=1024;
+    size_t written=client.write(bytes+offset,amount);
+    if(written>amount)return false;
+    if(written){offset+=written;lastProgress=millis();}
+    else if(millis()-lastProgress>5000)break;
+    delay(1);
+  }
+  return offset==length;
+}
+void serveAsset(const uint8_t *bytes, size_t length, const char *mime, bool cache) {
+  NetworkClient client=server.client();
+  client.setTimeout(1000);
+  String header="HTTP/1.1 200 OK\r\nContent-Type: "+String(mime)+"\r\nContent-Encoding: gzip\r\nContent-Length: "+String(length)+"\r\nCache-Control: "+String(cache?"public, max-age=31536000, immutable":"no-store")+"\r\nConnection: close\r\n\r\n";
+  Serial.printf("HTTP transfer: %s (%u bytes), free heap %u\n",mime,(unsigned)length,ESP.getFreeHeap());
+  bool ok=writeAll(client,(const uint8_t*)header.c_str(),header.length()) && writeAll(client,bytes,length);
+  Serial.println(ok?"HTTP transfer complete":"HTTP transfer interrupted; reload page and check power/Wi-Fi");
+  client.stop();
+}
+
+
 // =============== SETUP =========================
 void setup() {
   Serial.begin(115200);
@@ -566,9 +601,10 @@ void setup() {
   Serial.println("Connecting to configured Wi-Fi. Dashboard IP prints when connected.");
 
   server.on("/", HTTP_GET, []() {
-    server.send_P(200, "text/html", PAGE);
+    serveAsset(PAGE_GZ,sizeof(PAGE_GZ),"text/html; charset=utf-8",false);
   });
 
+  server.on("/three-r128.js", HTTP_GET, [](){serveAsset(THREE_GZ,sizeof(THREE_GZ),"application/javascript",true);});
   server.on("/api", HTTP_GET, handleAPI);
   const char* headers[] = {"Origin"};
   server.collectHeaders(headers, 1);
@@ -587,18 +623,7 @@ void setup() {
 
 // =============== LOOP ==========================
 void loop() {
-  accountRuntime();
+  serviceSensors();
   maintainWiFi();
   server.handleClient();
-
-  updateTemperatures();
-
-  unsigned long now = millis();
-  if (now - lastMPU >= 100) {
-    lastMPU = now;
-    readMPU();
-    sampleSequence++;
-    evaluateSafety();
-  }
-
 }
