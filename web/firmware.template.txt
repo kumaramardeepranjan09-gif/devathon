@@ -5,10 +5,11 @@
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <math.h>
+#include <Preferences.h>
 
 // =============== WIFI SETTINGS ===============
-const char* WIFI_NAME = "SmartPredict";
-const char* WIFI_PASSWORD = "ChangeMe2026"; // CHANGE before upload (8+ characters)
+const char* WIFI_NAME = "09"; // Existing 2.4 GHz router/hotspot SSID
+const char* WIFI_PASSWORD = "SET_YOUR_WIFI_PASSWORD"; // CHANGE before upload (8+ characters)
 
 WebServer server(80);
 
@@ -96,6 +97,31 @@ String warningText = "Starting sensors";
 
 String lastEvent = "System started";
 unsigned long eventCount = 0;
+
+// Service budget measures commanded run time, not predicted failure life.
+const double SERVICE_BUDGET_HOURS = 200.0;
+Preferences runtimeStore;
+uint64_t runtimeMs1=0, runtimeMs2=0;
+bool runtimePersistent=false;
+unsigned long runtimeTick=0, runtimeSaved=0;
+void accountRuntime() {
+  unsigned long now=millis(), elapsed=now-runtimeTick; runtimeTick=now;
+  if (relay1State && motor1State!="STOP" && speed1>0) runtimeMs1+=elapsed;
+  if (relay2State && motor2State!="STOP" && speed2>0) runtimeMs2+=elapsed;
+  if (runtimePersistent && now-runtimeSaved>=60000) {
+    runtimePersistent=runtimeStore.putULong64("m1",runtimeMs1)==8 && runtimeStore.putULong64("m2",runtimeMs2)==8;
+    runtimeSaved=now;
+  }
+}
+void maintainWiFi() {
+  static bool wasConnected=false;
+  static unsigned long lastAttempt=0;
+  bool connected=WiFi.status()==WL_CONNECTED;
+  if (connected && !wasConnected) { Serial.print("Dashboard IP: http://"); Serial.println(WiFi.localIP()); }
+  if (!connected && wasConnected) Serial.println("Wi-Fi lost; local protection continues. Reconnecting...");
+  if (!connected && millis()-lastAttempt>=15000) { lastAttempt=millis(); WiFi.reconnect(); Serial.println("Waiting for 2.4 GHz Wi-Fi; check SSID/password and hotspot isolation."); }
+  wasConnected=connected;
+}
 
 // =============== EVENT LOG =====================
 void logEvent(String message) {
@@ -369,6 +395,7 @@ void evaluateSafety() {
 
 // =============== WEB COMMANDS ==================
 void handleCommand() {
+  accountRuntime();
   if (!server.hasArg("c")) {
     server.send(400, "text/plain", "Missing command");
     return;
@@ -454,6 +481,10 @@ void handleCommand() {
 // =============== LIVE DATA API =================
 void handleAPI() {
   String j = "{";
+  j += "\"runtime1_hours\":" + String((double)runtimeMs1/3600000.0,6) + ",";
+  j += "\"runtime2_hours\":" + String((double)runtimeMs2/3600000.0,6) + ",";
+  j += "\"service_budget_hours\":" + String(SERVICE_BUDGET_HOURS,2) + ",";
+  j += "\"runtime_persistent\":" + String(runtimePersistent ? "true" : "false") + ",";
   j += "\"sequence\":" + String(sampleSequence) + ",";
   j += "\"uptime\":" + String(millis()) + ",";
   j += "\"tempWarning\":" + String(TEMP_WARNING_C) + ",";
@@ -532,25 +563,14 @@ void setup() {
   Wire.setClock(100000);
   initMPU();
 
-  WiFi.mode(WIFI_AP);
+  runtimePersistent=runtimeStore.begin("motor-runtime",false);
+  if (runtimePersistent) { runtimeMs1=runtimeStore.getULong64("m1",0); runtimeMs2=runtimeStore.getULong64("m2",0); }
+  runtimeTick=runtimeSaved=millis();
+  WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
-
-  bool apOK = WiFi.softAP(
-    WIFI_NAME,
-    WIFI_PASSWORD,
-    1,
-    false,
-    4
-  );
-
-  Serial.println("\n===== ESP32 DASHBOARD =====");
-  Serial.print("AP started: ");
-  Serial.println(apOK ? "YES" : "NO");
-  Serial.print("Wi-Fi name: ");
-  Serial.println(WIFI_NAME);
-
-  Serial.print("IP address: ");
-  Serial.println(WiFi.softAPIP());
+  WiFi.setAutoReconnect(true);
+  WiFi.begin(WIFI_NAME,WIFI_PASSWORD);
+  Serial.println("Connecting to configured Wi-Fi. Dashboard IP prints when connected.");
 
   server.on("/", HTTP_GET, []() {
     server.send_P(200, "text/html", PAGE);
@@ -574,6 +594,8 @@ void setup() {
 
 // =============== LOOP ==========================
 void loop() {
+  accountRuntime();
+  maintainWiFi();
   server.handleClient();
 
   updateTemperatures();
@@ -586,12 +608,4 @@ void loop() {
     evaluateSafety();
   }
 
-  static int previousClients = -1;
-  int clients = WiFi.softAPgetStationNum();
-
-  if (clients != previousClients) {
-    previousClients = clients;
-    Serial.print("Connected phone/device count: ");
-    Serial.println(clients);
-  }
 }

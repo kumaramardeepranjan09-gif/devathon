@@ -19,7 +19,7 @@ p=p.replace("history.push({...d,time:", "history.push({...d,mode:window.DEMO?'DE
 p=p.replace("$('address').value=location.host;", "$('address').value=location.host;")
 libs='<script>\n'+(root/'web/vendor/three.min.js').read_text()+'\n</script><script>\n'+(root/'web/motor-view.js').read_text()+'\n</script>'
 p=p.replace('<script>\n\'use strict\';',libs+'\n<!-- TRANSPORT -->\n<script>\n\'use strict\';')
-p=p.replace('</html>', '<script>\n'+(root/'web/dashboard-upgrade.js').read_text()+'\n</script></html>')
+p=p.replace('</html>', '<script>\n'+(root/'web/dashboard-upgrade.js').read_text()+'\n'+(root/'web/monitoring.js').read_text()+'\n</script></html>')
 hardware=p.replace('<!-- TRANSPORT -->','')
 demo=p.replace('<!-- TRANSPORT -->','<script>\n'+(root/'web/demo.js').read_text()+'\n</script>')
 demo=demo.replace('SMARTPREDICT / LIVE STATION','SMARTPREDICT / DEMO STUDIO').replace('Independent temperatures · Shared motion · Local protection','SIMULATED READINGS · No ESP32 required · No hardware commands')

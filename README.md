@@ -17,10 +17,10 @@ Demo is visibly labelled **SIMULATED**. Healthy, Motor 1 warning, Motor 2 critic
 1. Arduino IDE 2.x install karein. Boards Manager mein **esp32 by Espressif Systems 3.3.0** install karein. Additional board URL: `https://espressif.github.io/arduino-esp32/package_esp32_index.json`.
 2. Library Manager mein **OneWire 2.3.8** aur **DallasTemperature 4.0.5** install karein. WiFi/WebServer/Wire ESP32 package mein hain.
 3. `SmartPredict_ESP32.ino` ko usi naam wale folder se open karein. Board **ESP32 Dev Module** (classic WROOM) aur correct USB port select karein.
-4. File ke top mein `WIFI_NAME` aur `WIFI_PASSWORD` set karein. Default network name `SmartPredict`; password ko upload se pehle apne 8+ character password se replace karein. Credentials GitHub par commit na karein.
+4. File ke top mein `WIFI_NAME` aur `WIFI_PASSWORD` set karein. SSID `09` is configured for your existing 2.4 GHz Wi-Fi. Set `WIFI_PASSWORD` locally before upload; the public repository contains a placeholder. Credentials GitHub par commit na karein.
 5. Motor power disconnected rakhkar Verify/Upload karein. Serial Monitor **115200 baud** kholein.
-6. Phone/laptop ko ESP32 ke **SmartPredict Wi-Fi access point** se connect karein. “No internet” normal hai; connected rahein.
-7. Browser mein **http://192.168.4.1** kholein (Serial Monitor mein printed IP authoritative hai). Dashboard ESP32 se hi load hota hai. IP code mein dalne ki zaroorat nahi. Address box dusre ESP32 IP ko open karta hai.
+6. ESP32 aur phone/laptop ko **same 2.4 GHz Wi-Fi network `09`** par connect karein. ESP32 now uses station mode, not its own access point.
+7. Serial Monitor (115200 baud) mein **Dashboard IP: http://...** print hone ka wait karein, phir wahi address browser mein kholein. `192.168.4.1` is not the station-mode address. Dashboard ESP32 se hi load hota hai. IP code mein dalne ki zaroorat nahi. Address box dusre ESP32 IP ko open karta hai.
 8. Dono temperature aur shared MPU healthy hone ka wait karein. Outputs boot par OFF hain. Wiring verify karne ke baad motor power connect karein aur Forward click karein. Stop both motors button PWM aur dono relays OFF karta hai.
 
 ## Exact hardware and GPIO wiring
@@ -54,7 +54,7 @@ Search **`EDIT THRESHOLDS HERE`** in the `.ino`. The constants are authoritative
 - `VIB_WARNING = 0.25`, `VIB_CRITICAL = 0.70` — acceleration magnitude deviation from 1 g.
 - `ROT_WARNING = 30.0`, `ROT_CRITICAL = 90.0` — angular velocity magnitude in degrees/second.
 
-Temperature constants are on lines **43–45**; movement constants are on lines **77–80** of the delivered sketch. Search names if later edits move lines. Edit, compile and upload; the UI reads thresholds from the firmware API. Never set warning ≥ critical. Movement limits are initial commissioning values and must be calibrated on the actual common mount; they are not measured vibration RMS or motor-specific vibration. At 10 Hz the MPU path detects gross movement, not high-frequency bearing vibration. Movement warning uses 3 consecutive samples; critical uses 4. UI shows current threshold exceedance immediately; the firmware latch applies persistence. Temperature conversion completes approximately every 2.5 seconds.
+Search `TEMP_WARNING_C`, `TEMP_CRITICAL_C`, `TEMP_RESET_C`, `VIB_WARNING`, `VIB_CRITICAL`, `ROT_WARNING`, `ROT_CRITICAL` near the top of the sketch; line numbers shift as features are added. Search names if later edits move lines. Edit, compile and upload; the UI reads thresholds from the firmware API. Never set warning ≥ critical. Movement limits are initial commissioning values and must be calibrated on the actual common mount; they are not measured vibration RMS or motor-specific vibration. At 10 Hz the MPU path detects gross movement, not high-frequency bearing vibration. Movement warning uses 3 consecutive samples; critical uses 4. UI shows current threshold exceedance immediately; the firmware latch applies persistence. Temperature conversion completes approximately every 2.5 seconds.
 
 Sensor loss after the initial 5-second boot grace stops both motors, latches and sounds the buzzer. DS18B20 disconnected, nonfinite, out-of-range and 85°C power-on values are rejected. Healthy sensors are required before motor start. Critical latches require manual reset after conditions become safe; reset never starts motors. Power cycling does not auto-start. A software fault, processor hang or electrical failure can defeat software protection: retain an independent physical power cutoff.
 
@@ -64,8 +64,8 @@ Sensor loss after the initial 5-second boot grace stops both motors, latches and
 - One MPU reading is explicitly shared by both. It cannot tell which motor produced vibration.
 - Detailed Three.js motor models adapted from the uploaded motor source show commanded rotation/direction only; animation stops on reported stop, critical latch or stale/disconnected data. No RPM measurement is claimed.
 - Fleet and per-motor reports include last readings, temperature peak, thresholds, session events, observation window and inspection suggestions. Print / Save PDF uses the browser print dialog.
-- CSV exports up to 1800 retained browser samples. Reports/events are session-local; export before closing. No historical data is stored permanently on the ESP32.
-- Control POSTs are same-origin; do not expose this local device to the public Internet. Everyone with the access-point password can control it. Set a private AP password.
+- CSV exports up to 1800 retained browser samples. Reports/events are session-local; export before closing. Commanded run-time totals are checkpointed in ESP32 Preferences once per minute. Up to one checkpoint interval can be lost on sudden power loss; flash erasure loses totals.
+- Control POSTs are same-origin; do not expose this local device to the public Internet. Other users on the same trusted Wi-Fi may control it. Do not port-forward this dashboard.
 - Dashboard network loss does not disable ESP32 local protection or automatically stop otherwise healthy motors. Use the physical stop if browser access is lost.
 
 ## Validation and limitations
@@ -99,3 +99,15 @@ Demo and hardware now share a compact system overview, independent Motor 1/Motor
 Motor reports use the selected time range, contain only the selected motor's temperatures/events, and include min/max/average when at least two valid samples exist. Shared MPU evidence is explicitly separate. Each motor has its own CSV export; global CSV and fleet reports remain available. Reports show offline status when last values are retained. Data is bounded to 1800 samples and 100 events per tab.
 
 Run `node tests/upgrade.cjs` for independent commands/PWM, unsafe-reset rejection, chart filters, report statistics/event isolation, PDF generation, separate CSV, and responsive layout. Source for the common UI extension is `web/dashboard-upgrade.js`; run the existing `python3 tools/build.py` after edits to update both standalone outputs and embedded firmware.
+
+## Current connection and monitoring workflow
+
+The latest firmware joins your router/hotspot **09** in station mode. Set its password locally in `WIFI_PASSWORD` (never publish it). Use a 2.4 GHz network; classic ESP32 cannot connect to 5 GHz-only networks. Open Serial Monitor at **115200**, press EN/reset once if you missed the boot messages, and wait for `Dashboard IP: http://...`. Open exactly that HTTP address on a phone/laptop connected to the same network. Disable guest/client isolation. No fixed IP is assumed; reconnect IP is printed whenever Wi-Fi returns. No automatic motor start occurs after reconnect or reset. Local protection continues while Wi-Fi is unavailable.
+
+Main dashboard includes two live 3D motors, independent motor-detail buttons, an Alerts button showing the latest 100 session events, a downloadable HTML report (with Print/Save PDF), individual reports, separate-colour trends and service runtime. Models follow reported direction/PWM/relay state and stop visually on critical/disconnect. These are commands, not shaft sensor feedback. If WebGL is unavailable, the UI displays an explicit fallback; use a current browser with hardware acceleration.
+
+Service lifecycle defaults to **200 hours**, configurable via `SERVICE_BUDGET_HOURS`. It is a maintenance budget, not a predicted failure date. The counters measure relay-enabled, nonzero-PWM commanded operation. Values are stored locally every minute and read back after reboot; flash erase resets them. Persistence errors are labelled volatile. Ranking says **Cooler now** using valid temperatures only; tied, disconnected or faulted states do not invent a best motor. Compare under equivalent load and ambient conditions.
+
+Download report records current failure/warning evidence, recorded session events, sensor status, selected-range statistics and charts. Physical root causes (bearing damage, winding faults, alignment) require inspection and cannot be inferred reliably from these sensors alone.
+
+Connection checklist: upload with motor supply off → check Serial IP → open dashboard → confirm both temperatures/MPU healthy → warm each sensor separately → compare with thermometer → verify relay OFF polarity → apply safe motor power → start each motor separately → verify stop, fault and reconnect. Existing GPIO table is authoritative; screenshot pin labels were not adopted.
