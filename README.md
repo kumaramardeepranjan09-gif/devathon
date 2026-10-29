@@ -101,3 +101,9 @@ Graphs retain the correct tilt series and units after resizing and changing time
 The model stops for stopped/zero-PWM output, a critical latch, missing shared movement, or stale/offline telemetry. Shared IMU movement plus commanded PWM is only an animation estimate: one IMU cannot confirm independent shaft movement or RPM. Add an encoder/Hall sensor per motor for measured rotation.
 
 Additional UI regression check: `node tests/design.cjs` (Playwright and Chromium required). It checks separate downloadable reports, chart images, connection recovery messages, PWM percentage and tilt charts after viewport changes.
+
+### Anuraksana SCADA presentation
+
+`web/styles.css` defines the dark industrial palette; `web/scada.js` connects camera presets, thermal emphasis, visual pause, numeric PWM entry and per-motor maintenance work orders to existing telemetry and command handlers. Numeric input drafts remain untouched while focused. JSON work orders contain a unique identifier, observed readings, configured limits, variance and inspection suggestions; Print / Save PDF is local and nothing is dispatched externally.
+
+The reference's simulation-only RPM/current/load controls and 70/90°C defaults are deliberately not mapped to unsupported hardware measurements. Existing 31/34°C protection remains authoritative. Thermal mode is an illustrative emissive casing colour, not a thermal-camera measurement. PWM-based visual speed is damped and bounded at 18 rad/s; stale/stopped output stops the visualization immediately. The existing procedural model, shared motion units and hardware API remain in use. Work-order guidance does not claim ISO compliance or certified diagnosis.
