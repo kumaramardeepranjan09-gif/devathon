@@ -1,3 +1,13 @@
+# Current hardware: NO RELAY
+
+Use the same tested pins: DS18B20 DATA 16/17; IMU SDA21/SCL22 (0x68); buzzer23; L298N ENA25/IN1=26/IN2=27, ENB14/IN3=18/IN4=19. GPIO32/33 are unused. Connect motors directly to their L298N outputs; do not follow older relay wiring notes below. PWM uses ESP32 core 3.x ledcAttach at 1000 Hz / 8 bits. Remove ENA/ENB jumpers.
+
+MPU6050 (WHO_AM_I 0x68) and MPU6500 (0x70) are accepted. Keep the IMU still with both motors OFF during the one-second startup baseline acquisition. Acceleration and gyro deviation from this baseline drive movement detection. Motion detection defaults: 0.18 g or 12 degrees/second; edit MOTION_DETECT_G / MOTION_DETECT_DPS. Existing warning/critical protection limits remain separate and enabled; unlike the bring-up test, excessive motion still latches protection.
+
+**3D animation requires an active motor driver command AND shared movement_detected=true.** No movement, stop, sensor fault, stale telemetry or disconnect pauses animation. This shared detector cannot confirm individual shaft motion: smooth running may not cross thresholds; one motor or external shaking can trigger movement for both commanded motors. Add an encoder/Hall sensor to each motor for true per-motor rotation confirmation. No measured RPM is claimed.
+
+API r1/r2 are retained only as backward-compatible aliases for driver enable; no relay is installed or controlled. Relays are not required. Service counters track commanded operation, not actual motion.
+
 # SmartPredict — two motor station
 
 Single upload file: **[SmartPredict_ESP32/SmartPredict_ESP32.ino](SmartPredict_ESP32/SmartPredict_ESP32.ino)**. It contains the ESP32 firmware, offline dashboard, animated motor models, controls, reports and CSV export. No separate website, backend, CDN or API key is needed.
@@ -31,16 +41,16 @@ Demo is visibly labelled **SIMULATED**. Healthy, Motor 1 warning, Motor 2 critic
 | DS18B20 Motor 2 DATA | GPIO17, separate 4.7 kΩ pull-up to 3.3V |
 | Both DS18B20 | VDD 3.3V, GND common; use powered 3-wire mode |
 | MPU6050 SDA / SCL | GPIO21 / GPIO22; AD0 GND (0x68); compatible 3.3V supply/logic |
-| Relay IN1 / IN2 | GPIO32 / GPIO33; default active LOW |
+| GPIO32 / GPIO33 | Unused; no relay |
 | L298N ENA / IN1 / IN2 | GPIO25 / GPIO26 / GPIO27 |
 | L298N ENB / IN3 / IN4 | GPIO14 / GPIO18 / GPIO19 |
 | Active buzzer control | GPIO23, active HIGH through transistor driver |
 
-Remove L298N **ENA/ENB jumpers** before connecting PWM. Never connect ESP32 PWM to a jumper tied to 5V. L298N OUT1/OUT2 → Motor 1 circuit; OUT3/OUT4 → Motor 2 circuit. Each relay's COM/NO can interrupt one lead of its corresponding motor; use contacts rated for DC motor stall current. Keep NC unused. Both direction commands automatically enable that motor's relay. PWM value is a command, not measured RPM. Stop before changing direction; allow the rotor to settle (the firmware includes only a minimum 300 ms reversal interval).
+Remove L298N **ENA/ENB jumpers** before connecting PWM. Never connect ESP32 PWM to a jumper tied to 5V. L298N OUT1/OUT2 → Motor 1 circuit; OUT3/OUT4 → Motor 2 circuit. PWM value is a command, not measured RPM. Stop before changing direction; allow the rotor to settle (the firmware includes only a minimum 300 ms reversal interval).
 
 Battery → appropriate fuse and accessible physical power switch → L298N motor supply, rated for your motors/module. Battery → buck converter adjusted and measured to the board's permitted 5V input (not 3V3), with common logic grounds. Do not simultaneously feed conflicting USB/external supplies. L298N regulator/5V jumper behavior varies: follow your module's marked supply requirements; do not tie two regulator outputs together. Verify battery voltage, motor stall current, driver cooling and relay ratings before powering motors.
 
-Use a 3.3V-compatible relay input module and its rated coil supply. Add suitable external pull-ups to keep active-low relay inputs OFF while ESP32 resets; firmware alone cannot guarantee reset-time GPIO levels. Verify OFF polarity with motors disconnected. Do not feed 5V back into ESP32 pins.
+
 
 Buzzer: GPIO23 → ~1 kΩ → NPN base, ~10 kΩ base-to-ground, emitter ground, collector buzzer negative; buzzer positive to its rated supply. For an inductive buzzer use a flyback diode. Do not power a high-current buzzer directly from GPIO. Verify transistor pinout and current rating.
 
@@ -76,7 +86,7 @@ Passed in cloud: temperature boundaries, separate motor attribution, stop/latch/
 
 **ESP32 target compilation passed in GitHub Actions** for firmware commit `61291e4`: [verified successful build](https://github.com/kumaramardeepranjan09-gif/devathon/actions/runs/40782134885). The job compiles for `esp32:esp32:esp32` with core 3.3.0 and runs the host protection tests. Local cloud compilation was blocked by network policy; the remote build supplies the target compilation result. Run Arduino IDE Verify again after changing credentials or thresholds. **Physical-device validation remains pending:** no hardware was available for wiring, calibration, buzzer or relay tests.
 
-Before motor power: verify DS18B20 identities (warm each separately), remove one sensor and confirm latch, gently move the shared MPU, confirm relay OFF polarity, then test outputs with a safe low-energy setup. Ambient temperatures above the configured limits will intentionally block starting.
+Before motor power: verify DS18B20 identities (warm each separately), remove one sensor and confirm latch, gently move the shared MPU, confirm driver stop behavior, then test outputs with a safe low-energy setup. Ambient temperatures above the configured limits will intentionally block starting.
 
 ## Correct readings kaise verify karein
 
@@ -110,4 +120,4 @@ Service lifecycle defaults to **200 hours**, configurable via `SERVICE_BUDGET_HO
 
 Download report records current failure/warning evidence, recorded session events, sensor status, selected-range statistics and charts. Physical root causes (bearing damage, winding faults, alignment) require inspection and cannot be inferred reliably from these sensors alone.
 
-Connection checklist: upload with motor supply off → check Serial IP → open dashboard → confirm both temperatures/MPU healthy → warm each sensor separately → compare with thermometer → verify relay OFF polarity → apply safe motor power → start each motor separately → verify stop, fault and reconnect. Existing GPIO table is authoritative; screenshot pin labels were not adopted.
+Connection checklist: upload with motor supply off → check Serial IP → open dashboard → confirm both temperatures/MPU healthy → warm each sensor separately → compare with thermometer → verify driver stop behavior → apply safe motor power → start each motor separately → verify stop, fault and reconnect. Existing GPIO table is authoritative; screenshot pin labels were not adopted.

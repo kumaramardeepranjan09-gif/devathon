@@ -14,7 +14,7 @@ const int HIGH=1,LOW=0,BUZZER_PIN=23;
 bool buzzer=false,stopped=false,r1=true,r2=true;
 void digitalWrite(int,int v){buzzer=v;}
 void stopAll(){stopped=true;}
-void relay1(bool b){r1=b;} void relay2(bool b){r2=b;}
+void driver1(bool b){r1=b;} void driver2(bool b){r2=b;}
 void logEvent(String){}
 float t1=28,t2=28,vibration=0,rotation=0;
 bool t1OK=true,t2OK=true,mpuOK=true,criticalLock=false;

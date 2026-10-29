@@ -1,6 +1,6 @@
 // Demo transport never sends a hardware request. State exists in this tab only.
 window.DEMO=true;
-const sim={sequence:0,uptime:0,runtime1_hours:0,runtime2_hours:0,service_budget_hours:200,runtime_persistent:false,t1:28,t2:29,t1OK:true,t2OK:true,mpuOK:true,vib:.02,rot:1,ax:0,ay:0,az:1,sp1:150,sp2:150,m1:'FORWARD',m2:'FORWARD',r1:true,r2:true,critical:false,reason:'',warning:'Simulated healthy readings',tempWarning:32,tempCritical:36,vibWarning:.25,vibCritical:.7,rotWarning:30,rotCritical:90};
+const sim={movement_detected:true,sequence:0,uptime:0,runtime1_hours:0,runtime2_hours:0,service_budget_hours:200,runtime_persistent:false,t1:28,t2:29,t1OK:true,t2OK:true,mpuOK:true,vib:.02,rot:1,ax:0,ay:0,az:1,sp1:150,sp2:150,m1:'FORWARD',m2:'FORWARD',r1:true,r2:true,critical:false,reason:'',warning:'Simulated healthy readings',tempWarning:32,tempCritical:36,vibWarning:.25,vibCritical:.7,rotWarning:30,rotCritical:90};
 let demoOffline=false,simTick=performance.now();
 function demoRuntime(){const now=performance.now(),hours=(now-simTick)/3600000;simTick=now;for(const n of [1,2])if(sim['r'+n]&&sim['m'+n]!=='STOP'&&sim['sp'+n]>0)sim['runtime'+n+'_hours']+=hours;}
 function scenario(name){demoRuntime();demoOffline=name==='offline';sim.t1=28;sim.t2=29;sim.vib=.02;sim.rot=1;sim.t1OK=sim.t2OK=sim.mpuOK=true;sim.critical=false;sim.reason='';sim.m1=sim.m2='FORWARD';sim.r1=sim.r2=true;
