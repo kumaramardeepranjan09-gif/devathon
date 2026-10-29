@@ -408,7 +408,14 @@ void evaluateSafety() {
     warningText = "System operating normally";
   }
 
-  if (!criticalLock) digitalWrite(BUZZER_PIN, LOW);
+  // One short beep per warning episode; no repeated beeps while warning persists.
+  static bool warningActive=false;
+  static unsigned long warningBeepStarted=0;
+  bool warningNow=!criticalLock && statusText=="WARNING";
+  if(warningNow && !warningActive) warningBeepStarted=millis();
+  warningActive=warningNow;
+  if(criticalLock) digitalWrite(BUZZER_PIN,HIGH);
+  else digitalWrite(BUZZER_PIN,warningNow && millis()-warningBeepStarted<200 ? HIGH : LOW);
 }
 
 // =============== WEB COMMANDS ==================

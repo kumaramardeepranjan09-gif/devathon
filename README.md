@@ -113,3 +113,7 @@ The reference's simulation-only RPM/current/load controls and 70/90°C defaults 
 The dashboard now has separate Overview, Machines, 3D Digital Twin, Sensor Trends, Fault Alerts, Maintenance Reports and Connection & limits pages. Both demo and firmware share this shell. Select one of the two real motor channels to inspect its existing controls/model. The top bar keeps ALL STOP accessible on every page. Status counts use live validated telemetry and show unavailable counts when offline.
 
 Generated work orders can be reopened from Maintenance Reports (latest 30 in the current tab only); downloading JSON preserves a copy outside the tab. Existing condition reports remain accessible. `tests/workspace.cjs` verifies navigation, motor stop, saved order reopening and mobile width. Older UI tests that directly click now-hidden controls must navigate to the corresponding page first.
+
+### Audible protection
+
+An active buzzer on GPIO23 sounds once for approximately 200 ms when the system enters a warning episode. It does not repeat while that warning remains active. Returning to normal rearms the next warning beep. Critical temperature, persistent critical tilt or sensor/stale-data faults stop both drivers and latch the buzzer continuously until a safe manual reset. Reset never restarts motors. Dashboard motor cards no longer repeat threshold notes or commanded-PWM text; engineering details remain in reports/settings.

@@ -28,6 +28,12 @@ void clean(){tiltDeg=0;imuCalibrated=true;t1=t2=28;vibration=rotation=0;t1OK=t2O
 tests=r'''
 int main(){
 clean();evaluateSafety();assert(statusText=="NORMAL");
+t1=31;evaluateSafety();assert(buzzer && !criticalLock);
+clockMs+=300;lastGoodTemp=clockMs;evaluateSafety();assert(!buzzer);
+evaluateSafety();assert(!buzzer);
+t1=28;evaluateSafety();t1=31;evaluateSafety();assert(buzzer);
+t1=34;evaluateSafety();clockMs+=1000;lastGoodTemp=clockMs;evaluateSafety();assert(buzzer && stopped && criticalLock);
+clean();evaluateSafety();assert(!buzzer);
 t1=31;evaluateSafety();assert(statusText=="WARNING" && warningText.find("Motor 1")!=String::npos && !criticalLock);
 t1=28;t2=34;evaluateSafety();assert(criticalLock && stopped && !r1 && !r2 && buzzer);assert(criticalReason.find("Motor 2")!=String::npos);
 t2=28;evaluateSafety();assert(criticalLock && buzzer);
