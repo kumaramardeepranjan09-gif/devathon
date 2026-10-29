@@ -324,7 +324,7 @@ void recoverCalibration() {
 void updateTemperatures() {
   unsigned long now = millis();
 
-  if (!tempPending && now - lastTempRequest >= 2500) {
+  if (!tempPending && now - lastTempRequest >= 1000) {
     ds1.requestTemperatures();
     ds2.requestTemperatures();
 
