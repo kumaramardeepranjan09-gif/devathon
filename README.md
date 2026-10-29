@@ -2,6 +2,16 @@
 
 Single upload file: **[SmartPredict_ESP32/SmartPredict_ESP32.ino](SmartPredict_ESP32/SmartPredict_ESP32.ino)**. It contains the ESP32 firmware, offline dashboard, animated motor models, controls, reports and CSV export. No separate website, backend, CDN or API key is needed.
 
+## Hardware ke bina demo dekhein
+
+Download **[demo.html](demo.html)** using GitHub's Download raw file button, then open the downloaded file in Chrome/Edge/Firefox. This is a single self-contained file with embedded Three.js: no npm, server or internet needed by its code. If your browser/device blocks local HTML, serve this folder using `python3 -m http.server 8080` and open `http://localhost:8080/demo.html` on your computer. Some phone file viewers cannot execute HTML JavaScript; use a full browser or laptop.
+
+Demo is visibly labelled **SIMULATED**. Healthy, Motor 1 warning, Motor 2 critical, shared movement, sensor fault and disconnect presets exercise the interface. Reports and CSV also carry DEMO labels. No demo action can send commands to hardware. Drag each 3D motor to rotate, scroll to zoom, use Cutaway to see rotor/bearings and Reset camera to restore the view.
+
+## Separate hardware firmware
+
+`demo.html` is only simulation. Upload `SmartPredict_ESP32/SmartPredict_ESP32.ino` for real readings; it serves the same 3D interface directly from the ESP32, with no demo transport. The HTML is gzip-compressed into flash to reduce transfer and firmware size. `web/hardware.html` is generated developer output: the actual hardware app must be opened from the ESP32's IP so `/api` and `/cmd` address that device.
+
 ## Pehle upload, phir IP kholo
 
 1. Arduino IDE 2.x install karein. Boards Manager mein **esp32 by Espressif Systems 3.3.0** install karein. Additional board URL: `https://espressif.github.io/arduino-esp32/package_esp32_index.json`.
@@ -52,7 +62,7 @@ Sensor loss after the initial 5-second boot grace stops both motors, latches and
 
 - Motor 1 and Motor 2 have independent temperatures, states and PWM/direction controls.
 - One MPU reading is explicitly shared by both. It cannot tell which motor produced vibration.
-- 3D CSS motor models show commanded rotation/direction only; animation stops on reported stop, critical latch or stale/disconnected data. No RPM measurement is claimed.
+- Detailed Three.js motor models adapted from the uploaded motor source show commanded rotation/direction only; animation stops on reported stop, critical latch or stale/disconnected data. No RPM measurement is claimed.
 - Fleet and per-motor reports include last readings, temperature peak, thresholds, session events, observation window and inspection suggestions. Print / Save PDF uses the browser print dialog.
 - CSV exports up to 1800 retained browser samples. Reports/events are session-local; export before closing. No historical data is stored permanently on the ESP32.
 - Control POSTs are same-origin; do not expose this local device to the public Internet. Everyone with the access-point password can control it. Set a private AP password.
@@ -67,3 +77,17 @@ Passed in cloud: temperature boundaries, separate motor attribution, stop/latch/
 **ESP32 target compilation passed in GitHub Actions** for firmware commit `61291e4`: [verified successful build](https://github.com/kumaramardeepranjan09-gif/devathon/actions/runs/40782134885). The job compiles for `esp32:esp32:esp32` with core 3.3.0 and runs the host protection tests. Local cloud compilation was blocked by network policy; the remote build supplies the target compilation result. Run Arduino IDE Verify again after changing credentials or thresholds. **Physical-device validation remains pending:** no hardware was available for wiring, calibration, buzzer or relay tests.
 
 Before motor power: verify DS18B20 identities (warm each separately), remove one sensor and confirm latch, gently move the shared MPU, confirm relay OFF polarity, then test outputs with a safe low-energy setup. Ambient temperatures above the configured limits will intentionally block starting.
+
+## Correct readings kaise verify karein
+
+1. Confirm powered 3-wire DS18B20 wiring and separate 4.7 kΩ pull-ups. Secure sensor 1 to Motor 1, sensor 2 to Motor 2 with electrical isolation and good thermal contact. Warm only sensor 1 and check only Motor 1 changes; repeat for sensor 2. Compare both against a known thermometer at stable temperature. Surface temperature is not internal winding temperature.
+2. With the mount still, MPU acceleration magnitude should be near 1 g and angular velocity near 0 °/s. Small offsets are normal. Rigidly attach the single MPU to the common mount. Both motors share this reading; it cannot localize a fault. Never interpret g as mm/s or shaft RPM.
+3. At safe low power, observe normal movement first. Adjust `VIB_WARNING`, `VIB_CRITICAL`, `ROT_WARNING`, `ROT_CRITICAL` only after measuring the actual baseline. Temperature warning/critical remain 32/36°C by default. Keep warning below critical and reset below warning. Edit the `.ino` constants and re-upload; the dashboard shows the returned firmware limits.
+4. Unplug one temperature sensor: its display must become unavailable and both motors must stop/latch after detection. Unplug MPU: shared sensor fault must latch. After restoring healthy cool sensors, Reset then manually start. Verify physical outputs; an ON label is a commanded state, not contact/shaft feedback.
+5. Inspect Serial Monitor at 115200 and `/api` from the ESP32 IP. Confirm `t1OK`, `t2OK`, `mpuOK` are true, `sequence` increases, each warmed temperature changes, and PWM/relay values match your commands. A frozen or disconnected browser clears live readings and stops its animations.
+
+## Rebuild for developers
+
+Edit `web/dashboard.template.html`, `web/motor-view.js`, `web/demo.js`, or `web/firmware.template.txt`, then run `python3 tools/build.py`. This deterministically generates `demo.html`, `web/hardware.html`, and the single upload `.ino`. If you edit firmware constants directly in `.ino` for your device, mirror those edits in the firmware template before rebuilding, otherwise generation restores template defaults. Do not commit Wi-Fi secrets.
+
+Run `node tests/demo.cjs`, `node tests/dashboard.cjs`, and `python3 tests/safety.py`. The hardware browser test decompresses the actual embedded firmware payload. The cloud browser blocks `file://`, so demo browser validation uses a local HTTP server and verifies no external requests; direct file opening was not verified in that managed browser.

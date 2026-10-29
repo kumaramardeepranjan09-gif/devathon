@@ -1,0 +1,597 @@
+
+#include <WiFi.h>
+#include <WebServer.h>
+#include <Wire.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
+#include <math.h>
+
+// =============== WIFI SETTINGS ===============
+const char* WIFI_NAME = "SmartPredict";
+const char* WIFI_PASSWORD = "ChangeMe2026"; // CHANGE before upload (8+ characters)
+
+WebServer server(80);
+
+// =============== FIXED GPIO PINS ==============
+// DS18B20
+#define TEMP1_PIN 16
+#define TEMP2_PIN 17
+
+// MPU6050
+#define MPU_SDA 21
+#define MPU_SCL 22
+#define MPU_ADDR 0x68
+
+// Relay
+#define RELAY1_PIN 32
+#define RELAY2_PIN 33
+
+// L298N motor driver
+#define ENA 25
+#define IN1 26
+#define IN2 27
+#define ENB 14
+#define IN3 18
+#define IN4 19
+
+// Active buzzer
+#define BUZZER_PIN 23
+
+const bool RELAY_ACTIVE_LOW = true;
+
+// =============== EDIT THRESHOLDS HERE ==================
+const float TEMP_WARNING_C = 32.0;
+const float TEMP_CRITICAL_C = 36.0;
+const float TEMP_RESET_C = 31.0; // reset only below warning, with healthy sensors
+// Movement limits below: VIB_WARNING / VIB_CRITICAL (g), ROT_WARNING / ROT_CRITICAL (deg/s).
+// Initial commissioning values, NOT calibrated for your motor/mount.
+unsigned long sampleSequence = 0;
+unsigned long lastGoodTemp = 0;
+
+// =============== TEMPERATURE ==================
+OneWire ow1(TEMP1_PIN);
+OneWire ow2(TEMP2_PIN);
+DallasTemperature ds1(&ow1);
+DallasTemperature ds2(&ow2);
+
+float t1 = NAN, t2 = NAN;
+bool t1OK = false, t2OK = false;
+
+bool tempPending = false;
+unsigned long tempStarted = 0;
+unsigned long lastTempRequest = 0;
+
+// =============== MPU6050 ======================
+bool mpuOK = false;
+float ax = 0, ay = 0, az = 0;
+float gx = 0, gy = 0, gz = 0;
+float mpuTemp = 0;
+float vibration = 0;
+float rotation = 0;
+
+unsigned long lastMPU = 0;
+int criticalMotionSamples = 0;
+int warningMotionSamples = 0;
+
+// Initial demonstration thresholds; calibrate for your machine.
+const float VIB_WARNING = 0.25;
+const float VIB_CRITICAL = 0.70;
+const float ROT_WARNING = 30.0;
+const float ROT_CRITICAL = 90.0;
+
+// =============== SYSTEM STATE ==================
+bool relay1State = false;
+bool relay2State = false;
+
+String motor1State = "STOP";
+String motor2State = "STOP";
+
+int speed1 = 150;
+int speed2 = 150;
+
+bool criticalLock = false;
+String criticalReason = "";
+String statusText = "STARTING";
+String warningText = "Starting sensors";
+
+String lastEvent = "System started";
+unsigned long eventCount = 0;
+
+// =============== EVENT LOG =====================
+void logEvent(String message) {
+  lastEvent = String(millis() / 1000) + "s: " + message;
+  eventCount++;
+  Serial.println(lastEvent);
+}
+
+// =============== RELAYS ========================
+void setRelay(int pin, bool on) {
+  digitalWrite(pin, RELAY_ACTIVE_LOW
+                    ? (on ? LOW : HIGH)
+                    : (on ? HIGH : LOW));
+}
+
+void relay1(bool on) {
+  relay1State = on;
+  setRelay(RELAY1_PIN, on);
+}
+
+void relay2(bool on) {
+  relay2State = on;
+  setRelay(RELAY2_PIN, on);
+}
+
+// =============== MOTORS ========================
+void stopM1() {
+  analogWrite(ENA, 0);
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, LOW);
+  motor1State = "STOP";
+}
+
+void stopM2() {
+  analogWrite(ENB, 0);
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, LOW);
+  motor2State = "STOP";
+}
+
+void stopAll() {
+  stopM1();
+  stopM2();
+}
+
+void m1Forward() {
+  if (motor1State == "REVERSE") { stopM1(); delay(300); }
+  relay1(true);
+  digitalWrite(IN1, HIGH);
+  digitalWrite(IN2, LOW);
+  analogWrite(ENA, speed1);
+  motor1State = "FORWARD";
+}
+
+void m1Reverse() {
+  if (motor1State == "FORWARD") { stopM1(); delay(300); }
+  relay1(true);
+  digitalWrite(IN1, LOW);
+  digitalWrite(IN2, HIGH);
+  analogWrite(ENA, speed1);
+  motor1State = "REVERSE";
+}
+
+void m2Forward() {
+  if (motor2State == "REVERSE") { stopM2(); delay(300); }
+  relay2(true);
+  digitalWrite(IN3, HIGH);
+  digitalWrite(IN4, LOW);
+  analogWrite(ENB, speed2);
+  motor2State = "FORWARD";
+}
+
+void m2Reverse() {
+  if (motor2State == "FORWARD") { stopM2(); delay(300); }
+  relay2(true);
+  digitalWrite(IN3, LOW);
+  digitalWrite(IN4, HIGH);
+  analogWrite(ENB, speed2);
+  motor2State = "REVERSE";
+}
+
+// =============== MPU6050 REGISTERS =============
+bool readReg(byte reg, byte &value) {
+  Wire.beginTransmission(MPU_ADDR);
+  Wire.write(reg);
+
+  if (Wire.endTransmission(false) != 0) return false;
+
+  if (Wire.requestFrom((uint8_t)MPU_ADDR,
+                       (uint8_t)1,
+                       (uint8_t)true) != 1) return false;
+
+  value = Wire.read();
+  return true;
+}
+
+bool readWord(byte reg, int16_t &value) {
+  Wire.beginTransmission(MPU_ADDR);
+  Wire.write(reg);
+
+  if (Wire.endTransmission(false) != 0) return false;
+
+  if (Wire.requestFrom((uint8_t)MPU_ADDR,
+                       (uint8_t)2,
+                       (uint8_t)true) != 2) return false;
+
+  uint8_t hi = Wire.read();
+  uint8_t lo = Wire.read();
+
+  value = (int16_t)(((uint16_t)hi << 8) | lo);
+  return true;
+}
+
+void initMPU() {
+  byte who;
+
+  if (!readReg(0x75, who)) {
+    mpuOK = false;
+    Serial.println("MPU6050 not detected");
+    return;
+  }
+
+  Serial.printf("MPU WHO_AM_I: 0x%02X\n", who);
+
+  Wire.beginTransmission(MPU_ADDR);
+  Wire.write(0x6B);
+  Wire.write(0x00);
+  if (Wire.endTransmission() != 0) {
+    mpuOK = false;
+    return;
+  }
+
+  delay(100);
+
+  Wire.beginTransmission(MPU_ADDR);
+  Wire.write(0x1C);
+  Wire.write(0x00);  // +/- 2g
+  if (Wire.endTransmission() != 0) { mpuOK=false; return; }
+
+  Wire.beginTransmission(MPU_ADDR);
+  Wire.write(0x1B);
+  Wire.write(0x00);  // +/- 250 degrees/s
+  if (Wire.endTransmission() != 0) { mpuOK=false; return; }
+
+  mpuOK = (who == 0x68);
+}
+
+void readMPU() {
+  if (!mpuOK) { initMPU(); if (!mpuOK) return; }
+  int16_t rax, ray, raz, rt, rgx, rgy, rgz;
+
+  // One burst keeps all axes from the same register snapshot.
+  Wire.beginTransmission(MPU_ADDR);
+  Wire.write(0x3B);
+  if (Wire.endTransmission(false) != 0 || Wire.requestFrom((uint8_t)MPU_ADDR, (uint8_t)14, (uint8_t)true) != 14) {
+    mpuOK=false; return;
+  }
+  int16_t words[7];
+  for (int i=0;i<7;i++) { uint8_t hi=Wire.read(),lo=Wire.read(); words[i]=(int16_t)(((uint16_t)hi<<8)|lo); }
+  rax=words[0]; ray=words[1]; raz=words[2]; rt=words[3]; rgx=words[4]; rgy=words[5]; rgz=words[6];
+
+  mpuOK = true;
+
+  ax = rax / 16384.0;
+  ay = ray / 16384.0;
+  az = raz / 16384.0;
+
+  gx = rgx / 131.0;
+  gy = rgy / 131.0;
+  gz = rgz / 131.0;
+
+  mpuTemp = rt / 340.0 + 36.53;
+
+  float totalG = sqrtf(ax * ax + ay * ay + az * az);
+  vibration = fabsf(totalG - 1.0);
+  rotation = sqrtf(gx * gx + gy * gy + gz * gz);
+}
+
+// =============== TEMPERATURE UPDATES ===========
+void updateTemperatures() {
+  unsigned long now = millis();
+
+  if (!tempPending && now - lastTempRequest >= 2500) {
+    ds1.requestTemperatures();
+    ds2.requestTemperatures();
+
+    tempStarted = now;
+    lastTempRequest = now;
+    tempPending = true;
+  }
+
+  if (tempPending && now - tempStarted >= 800) {
+    t1 = ds1.getTempCByIndex(0);
+    t2 = ds2.getTempCByIndex(0);
+
+    t1OK = t1 != DEVICE_DISCONNECTED_C &&
+           isfinite(t1) && t1 >= -55 && t1 <= 125 && t1 != 85.0;
+
+    t2OK = t2 != DEVICE_DISCONNECTED_C &&
+           isfinite(t2) && t2 >= -55 && t2 <= 125 && t2 != 85.0;
+
+    tempPending = false;
+    lastGoodTemp = now;
+  }
+}
+
+// =============== SAFETY ========================
+void criticalShutdown(String reason) {
+  if (!criticalLock) {
+    criticalLock = true;
+    criticalReason = reason;
+    logEvent("CRITICAL: " + reason);
+  }
+
+  stopAll();
+  relay1(false);
+  relay2(false);
+  digitalWrite(BUZZER_PIN, HIGH);
+}
+
+void evaluateSafety() {
+  if (millis() > 5000 && (!t1OK || !t2OK || !mpuOK || millis()-lastGoodTemp > 5000)) {
+    criticalShutdown(!mpuOK ? "Shared MPU sensor fault: both motors" : !t1OK ? "Motor 1 temperature sensor fault" : !t2OK ? "Motor 2 temperature sensor fault" : "Temperature samples stale");
+  }
+  bool tempCritical =
+    (t1OK && t1 >= TEMP_CRITICAL_C) ||
+    (t2OK && t2 >= TEMP_CRITICAL_C);
+
+  bool tempWarning =
+    (t1OK && t1 >= TEMP_WARNING_C) ||
+    (t2OK && t2 >= TEMP_WARNING_C);
+
+  bool motionWarning =
+    vibration >= VIB_WARNING ||
+    rotation >= ROT_WARNING;
+
+  bool motionCritical =
+    vibration >= VIB_CRITICAL ||
+    rotation >= ROT_CRITICAL;
+
+  if (motionWarning) { if (warningMotionSamples < 3) warningMotionSamples++; }
+  else warningMotionSamples = 0;
+
+  if (motionCritical) { if (criticalMotionSamples < 4) criticalMotionSamples++; }
+  else criticalMotionSamples = 0;
+
+  if (tempCritical) {
+    criticalShutdown(t1OK && t1 >= TEMP_CRITICAL_C ? "Motor 1 temperature critical" : "Motor 2 temperature critical");
+  } else if (criticalMotionSamples >= 4) {
+    criticalShutdown("Excessive movement/vibration");
+  }
+
+  if (criticalLock) {
+    statusText = "CRITICAL";
+    warningText = criticalReason;
+  } else if (tempWarning || warningMotionSamples >= 3) {
+    statusText = "WARNING";
+    warningText = tempWarning
+      ? (t1OK && t1 >= TEMP_WARNING_C ? "Motor 1 temperature warning" : "Motor 2 temperature warning")
+      : "High movement/vibration";
+  } else if (!t1OK || !t2OK || !mpuOK) {
+    statusText = "WARNING";
+    warningText = "Check sensor connection";
+  } else {
+    statusText = "NORMAL";
+    warningText = "System operating normally";
+  }
+
+  if (!criticalLock) digitalWrite(BUZZER_PIN, LOW);
+}
+
+// =============== WEB COMMANDS ==================
+void handleCommand() {
+  if (!server.hasArg("c")) {
+    server.send(400, "text/plain", "Missing command");
+    return;
+  }
+
+  if (server.header("Origin").length() && server.header("Origin") != "http://" + server.hostHeader()) {
+    server.send(403,"text/plain","Cross-origin command blocked"); return;
+  }
+  String c = server.arg("c");
+  c.toUpperCase();
+
+  if (criticalLock && c != "RESET" && c != "ALLSTOP" && c != "M1S" && c != "M2S" && c != "R1OFF" && c != "R2OFF") {
+    server.send(423, "text/plain",
+                "CRITICAL LOCK: resolve fault and reset");
+    return;
+  }
+
+  bool starts = c == "R1ON" || c == "R2ON" || c == "M1F" || c == "M1R" || c == "M2F" || c == "M2R";
+  if (starts && (!t1OK || !t2OK || !mpuOK || t1 >= TEMP_WARNING_C || t2 >= TEMP_WARNING_C || vibration >= VIB_WARNING || rotation >= ROT_WARNING)) {
+    server.send(409,"text/plain","Start blocked: sensors must be healthy and below warning limits"); return;
+  }
+  if (c == "R1ON") relay1(true);
+  else if (c == "R1OFF") { stopM1(); relay1(false); }
+  else if (c == "R2ON") relay2(true);
+  else if (c == "R2OFF") { stopM2(); relay2(false); }
+  else if (c == "M1F") m1Forward();
+  else if (c == "M1R") m1Reverse();
+  else if (c == "M1S") stopM1();
+  else if (c == "M2F") m2Forward();
+  else if (c == "M2R") m2Reverse();
+  else if (c == "M2S") stopM2();
+  else if (c == "ALLSTOP") { stopAll(); relay1(false); relay2(false); }
+  else if (c == "SPEED1" || c == "SPEED2") {
+    if (!server.hasArg("v")) {
+      server.send(400, "text/plain", "Missing speed");
+      return;
+    }
+
+    String raw = server.arg("v");
+    for (unsigned int i=0;i<raw.length();i++) if (!isDigit(raw[i])) { server.send(400,"text/plain","Invalid PWM"); return; }
+    int v = raw.toInt();
+    if (!raw.length() || raw.length()>3 || v<0 || v>255) { server.send(400,"text/plain","PWM must be 0..255"); return; }
+
+    if (c == "SPEED1") {
+      speed1 = v;
+      if (motor1State == "FORWARD") m1Forward();
+      else if (motor1State == "REVERSE") m1Reverse();
+    } else {
+      speed2 = v;
+      if (motor2State == "FORWARD") m2Forward();
+      else if (motor2State == "REVERSE") m2Reverse();
+    }
+  } else if (c == "RESET") {
+    bool tempSafe =
+      (t1OK && t1 < TEMP_RESET_C) &&
+      (t2OK && t2 < TEMP_RESET_C);
+
+    bool motionSafe =
+      vibration < VIB_WARNING &&
+      rotation < ROT_WARNING;
+
+    if (!tempSafe || !motionSafe || !mpuOK) {
+      server.send(409, "text/plain",
+                  "Reset blocked: check sensors/conditions");
+      return;
+    }
+
+    criticalLock = false;
+    criticalReason = "";
+    criticalMotionSamples = 0;
+    warningMotionSamples = 0;
+    digitalWrite(BUZZER_PIN, LOW);
+    logEvent("Safety reset");
+  } else {
+    server.send(400, "text/plain", "Unknown command");
+    return;
+  }
+
+  logEvent("Command: " + c);
+  server.send(200, "text/plain", "OK");
+}
+
+// =============== LIVE DATA API =================
+void handleAPI() {
+  String j = "{";
+  j += "\"sequence\":" + String(sampleSequence) + ",";
+  j += "\"uptime\":" + String(millis()) + ",";
+  j += "\"tempWarning\":" + String(TEMP_WARNING_C) + ",";
+  j += "\"tempCritical\":" + String(TEMP_CRITICAL_C) + ",";
+  j += "\"vibWarning\":" + String(VIB_WARNING) + ",";
+  j += "\"vibCritical\":" + String(VIB_CRITICAL) + ",";
+  j += "\"rotWarning\":" + String(ROT_WARNING) + ",";
+  j += "\"rotCritical\":" + String(ROT_CRITICAL) + ",";
+
+  j += "\"t1\":" + String(t1OK ? t1 : 0.0, 2) + ",";
+  j += "\"t2\":" + String(t2OK ? t2 : 0.0, 2) + ",";
+  j += "\"t1OK\":" + String(t1OK ? "true" : "false") + ",";
+  j += "\"t2OK\":" + String(t2OK ? "true" : "false") + ",";
+  j += "\"mpuOK\":" + String(mpuOK ? "true" : "false") + ",";
+
+  j += "\"ax\":" + String(ax, 3) + ",";
+  j += "\"ay\":" + String(ay, 3) + ",";
+  j += "\"az\":" + String(az, 3) + ",";
+  j += "\"gx\":" + String(gx, 2) + ",";
+  j += "\"gy\":" + String(gy, 2) + ",";
+  j += "\"gz\":" + String(gz, 2) + ",";
+  j += "\"mt\":" + String(mpuTemp, 2) + ",";
+  j += "\"vib\":" + String(vibration, 3) + ",";
+  j += "\"rot\":" + String(rotation, 2) + ",";
+
+  j += "\"status\":\"" + statusText + "\",";
+  j += "\"warning\":\"" + warningText + "\",";
+  j += "\"critical\":" + String(criticalLock ? "true" : "false") + ",";
+  j += "\"reason\":\"" + criticalReason + "\",";
+  j += "\"r1\":" + String(relay1State ? "true" : "false") + ",";
+  j += "\"r2\":" + String(relay2State ? "true" : "false") + ",";
+  j += "\"m1\":\"" + motor1State + "\",";
+  j += "\"m2\":\"" + motor2State + "\",";
+  j += "\"sp1\":" + String(speed1) + ",";
+  j += "\"sp2\":" + String(speed2) + ",";
+  j += "\"events\":" + String(eventCount) + ",";
+  j += "\"event\":\"" + lastEvent + "\"";
+  j += "}";
+
+  server.sendHeader("Cache-Control", "no-store");
+  server.send(200, "application/json", j);
+}
+
+// =============== DASHBOARD =====================
+/* EMBEDDED_DASHBOARD */
+
+// =============== SETUP =========================
+void setup() {
+  Serial.begin(115200);
+  delay(700);
+
+  pinMode(ENA, OUTPUT);
+  pinMode(IN1, OUTPUT);
+  pinMode(IN2, OUTPUT);
+  pinMode(ENB, OUTPUT);
+  pinMode(IN3, OUTPUT);
+  pinMode(IN4, OUTPUT);
+  stopAll();
+
+  digitalWrite(RELAY1_PIN, RELAY_ACTIVE_LOW ? HIGH : LOW);
+  digitalWrite(RELAY2_PIN, RELAY_ACTIVE_LOW ? HIGH : LOW);
+  pinMode(RELAY1_PIN, OUTPUT);
+  pinMode(RELAY2_PIN, OUTPUT);
+  relay1(false);
+  relay2(false);
+
+  pinMode(BUZZER_PIN, OUTPUT);
+  digitalWrite(BUZZER_PIN, LOW);
+
+  ds1.begin();
+  ds2.begin();
+  ds1.setWaitForConversion(false);
+  ds2.setWaitForConversion(false);
+
+  Wire.begin(MPU_SDA, MPU_SCL);
+  Wire.setClock(100000);
+  initMPU();
+
+  WiFi.mode(WIFI_AP);
+  WiFi.setSleep(false);
+
+  bool apOK = WiFi.softAP(
+    WIFI_NAME,
+    WIFI_PASSWORD,
+    1,
+    false,
+    4
+  );
+
+  Serial.println("\n===== ESP32 DASHBOARD =====");
+  Serial.print("AP started: ");
+  Serial.println(apOK ? "YES" : "NO");
+  Serial.print("Wi-Fi name: ");
+  Serial.println(WIFI_NAME);
+
+  Serial.print("IP address: ");
+  Serial.println(WiFi.softAPIP());
+
+  server.on("/", HTTP_GET, []() {
+    server.send_P(200, "text/html", PAGE);
+  });
+
+  server.on("/api", HTTP_GET, handleAPI);
+  const char* headers[] = {"Origin"};
+  server.collectHeaders(headers, 1);
+  server.on("/cmd", HTTP_POST, handleCommand);
+  server.begin();
+
+  Serial.println("Web server started");
+  Serial.println("Waiting for phone connection...");
+
+  ds1.requestTemperatures();
+  ds2.requestTemperatures();
+  tempStarted = millis();
+  lastTempRequest = millis();
+  tempPending = true;
+}
+
+// =============== LOOP ==========================
+void loop() {
+  server.handleClient();
+
+  updateTemperatures();
+
+  unsigned long now = millis();
+  if (now - lastMPU >= 100) {
+    lastMPU = now;
+    readMPU();
+    sampleSequence++;
+    evaluateSafety();
+  }
+
+  static int previousClients = -1;
+  int clients = WiFi.softAPgetStationNum();
+
+  if (clients != previousClients) {
+    previousClients = clients;
+    Serial.print("Connected phone/device count: ");
+    Serial.println(clients);
+  }
+}
