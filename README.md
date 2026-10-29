@@ -91,3 +91,11 @@ Before motor power: verify DS18B20 identities (warm each separately), remove one
 Edit `web/dashboard.template.html`, `web/motor-view.js`, `web/demo.js`, or `web/firmware.template.txt`, then run `python3 tools/build.py`. This deterministically generates `demo.html`, `web/hardware.html`, and the single upload `.ino`. If you edit firmware constants directly in `.ino` for your device, mirror those edits in the firmware template before rebuilding, otherwise generation restores template defaults. Do not commit Wi-Fi secrets.
 
 Run `node tests/demo.cjs`, `node tests/dashboard.cjs`, and `python3 tests/safety.py`. The hardware browser test decompresses the actual embedded firmware payload. The cloud browser blocks `file://`, so demo browser validation uses a local HTTP server and verifies no external requests; direct file opening was not verified in that managed browser.
+
+## Unified dashboard update
+
+Demo and hardware now share a compact system overview, independent Motor 1/Motor 2 panels, enhanced uploaded motor geometry (grille, cable gland, lifting eye, metallic lighting, shadows and cutaway), and one common trend section. Temperature charts compare both sensors and show firmware warning/critical limits. Shared acceleration deviation and angular velocity have separate charts and units. Hover for exact readings; select last 1/5/15 minutes or all retained session samples. No historical values are fabricated. Missing/long-disconnected periods are not joined into continuous traces.
+
+Motor reports use the selected time range, contain only the selected motor's temperatures/events, and include min/max/average when at least two valid samples exist. Shared MPU evidence is explicitly separate. Each motor has its own CSV export; global CSV and fleet reports remain available. Reports show offline status when last values are retained. Data is bounded to 1800 samples and 100 events per tab.
+
+Run `node tests/upgrade.cjs` for independent commands/PWM, unsafe-reset rejection, chart filters, report statistics/event isolation, PDF generation, separate CSV, and responsive layout. Source for the common UI extension is `web/dashboard-upgrade.js`; run the existing `python3 tools/build.py` after edits to update both standalone outputs and embedded firmware.
