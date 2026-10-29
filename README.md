@@ -87,3 +87,17 @@ Sources are in `web/`; `python3 tools/build.py` generates `demo.html`, `web/hard
 Run `python3 tests/safety.py`, `python3 tests/runtime.py`, `python3 tests/transfer.py`, `node tests/delivery.cjs`, `node tests/demo.cjs`, `node tests/upgrade.cjs`. Browser tests need Playwright and `/usr/bin/chromium`. GitHub Actions compiles the actual ESP32 target and runs native protection tests. Hardware tests use simulated telemetry; physical RF, power, sensor calibration and wiring require device validation. Managed cloud blocks `file://`, so the demo is tested over HTTP with no external requests.
 
 See [THIRD_PARTY.md](THIRD_PARTY.md) for the uploaded geometry and bundled Three.js attribution.
+
+### Light industrial dashboard (design update)
+
+Both the standalone `demo.html` and embedded ESP32 page use the same off-white / coral / charcoal design with two detailed motor models, bold readings, accessible navigation and separate motor report downloads. The supplied design guide is used for visual direction only; NASA dataset, ML predictions and decorative replay are not part of this hardware project.
+
+Each motor card offers **Motor report** (preview / Print / Save PDF) and **Download report** (portable HTML with embedded chart image). Reports identify the selected motor, observation window, valid temperature statistics, threshold/fault evidence, shared motion, run-time allowance and suggested inspection. A reported threshold violation is evidence, not a confirmed bearing or mechanical failure diagnosis. Download reports before closing the browser: session history is local to the tab.
+
+The connection panel includes **Retry connection** and Wi-Fi signal strength when provided by firmware. Polling remains sequential; interrupted 3D-library downloads retry in small chunks. Wi-Fi power saving is disabled and ESP32 automatic reconnection remains enabled. An old connection error now clears after successful telemetry recovery. A weak hotspot, power brownout or motor electrical noise can still disconnect physical hardware; use the wiring/power checks above and Serial Monitor disconnect/reset diagnostics.
+
+Graphs retain the correct tilt series and units after resizing and changing time ranges. Temperature lines use coral (Motor 1) and blue (Motor 2), motion green and tilt purple; dashed lines mark limits. Thresholds remain **31°C warning / 34°C critical**, **45° tilt warning / 75° critical**, and **200 minutes commanded run-time service allowance**.
+
+The model stops for stopped/zero-PWM output, a critical latch, missing shared movement, or stale/offline telemetry. Shared IMU movement plus commanded PWM is only an animation estimate: one IMU cannot confirm independent shaft movement or RPM. Add an encoder/Hall sensor per motor for measured rotation.
+
+Additional UI regression check: `node tests/design.cjs` (Playwright and Chromium required). It checks separate downloadable reports, chart images, connection recovery messages, PWM percentage and tilt charts after viewport changes.
