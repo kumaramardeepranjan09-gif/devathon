@@ -6,6 +6,7 @@
 #include <DallasTemperature.h>
 #include <math.h>
 #include <Preferences.h>
+#include <esp_system.h>
 
 // =============== WIFI SETTINGS ===============
 const char* WIFI_NAME = "09"; // Existing 2.4 GHz router/hotspot SSID
@@ -39,9 +40,9 @@ WebServer server(80);
 
 
 // =============== EDIT THRESHOLDS HERE ==================
-const float TEMP_WARNING_C = 32.0;
-const float TEMP_CRITICAL_C = 36.0;
-const float TEMP_RESET_C = 31.0; // reset only below warning, with healthy sensors
+const float TEMP_WARNING_C = 31.0;
+const float TEMP_CRITICAL_C = 34.0;
+const float TEMP_RESET_C = 30.0; // reset only below warning, with healthy sensors
 // Movement limits below: VIB_WARNING / VIB_CRITICAL (g), ROT_WARNING / ROT_CRITICAL (deg/s).
 // Initial commissioning values, NOT calibrated for your motor/mount.
 unsigned long sampleSequence = 0;
@@ -65,7 +66,10 @@ bool mpuOK = false;
 uint8_t imuIdentity=0;
 float baseAx=0,baseAy=0,baseAz=1,baseGx=0,baseGy=0,baseGz=0;
 const float MOTION_DETECT_G=0.18, MOTION_DETECT_DPS=12.0;
-bool movementDetected=false;
+bool movementDetected=false, imuCalibrated=false;
+const float TILT_WARNING_DEG=45.0, TILT_CRITICAL_DEG=75.0;
+const int PWM_WARNING=204, PWM_CRITICAL=242; // 80% / 95%, advisory alerts only
+float tiltDeg=0, filteredAx=0,filteredAy=0,filteredAz=1;
 float ax = 0, ay = 0, az = 0;
 float gx = 0, gy = 0, gz = 0;
 float mpuTemp = 0;
@@ -101,7 +105,8 @@ String lastEvent = "System started";
 unsigned long eventCount = 0;
 
 // Service budget measures commanded run time, not predicted failure life.
-const double SERVICE_BUDGET_HOURS = 200.0;
+const double SERVICE_BUDGET_MINUTES = 200.0;
+const double SERVICE_BUDGET_HOURS = SERVICE_BUDGET_MINUTES / 60.0;
 Preferences runtimeStore;
 uint64_t runtimeMs1=0, runtimeMs2=0;
 bool runtimePersistent=false;
@@ -116,12 +121,13 @@ void accountRuntime() {
   }
 }
 void maintainWiFi() {
+  // AutoReconnect owns retry scheduling. Never reconnect while STA is connecting.
   static bool wasConnected=false;
-  static unsigned long lastAttempt=0;
+  static unsigned long lastNotice=0;
   bool connected=WiFi.status()==WL_CONNECTED;
-  if (connected && !wasConnected) { Serial.print("Dashboard IP: http://"); Serial.println(WiFi.localIP()); }
-  if (!connected && wasConnected) Serial.println("Wi-Fi lost; local protection continues. Reconnecting...");
-  if (!connected && millis()-lastAttempt>=15000) { lastAttempt=millis(); WiFi.reconnect(); Serial.println("Waiting for 2.4 GHz Wi-Fi; check SSID/password and hotspot isolation."); }
+  if(connected && !wasConnected){Serial.print("Dashboard IP: http://");Serial.println(WiFi.localIP());}
+  if(!connected && wasConnected)Serial.println("Wi-Fi disconnected; automatic reconnection active, protection remains local.");
+  if(!connected && millis()-lastNotice>=30000){lastNotice=millis();Serial.printf("Wi-Fi status %d; waiting for automatic connection\n",(int)WiFi.status());}
   wasConnected=connected;
 }
 
@@ -262,7 +268,7 @@ void initMPU() {
 }
 
 void readMPU() {
-  if (!mpuOK) { initMPU(); if (!mpuOK) return; }
+  if (!mpuOK) { static unsigned long retryAt=0; if(millis()-retryAt<2000)return;retryAt=millis();initMPU(); if (!mpuOK) return; }
   int16_t rax, ray, raz, rt, rgx, rgy, rgz;
 
   // One burst keeps all axes from the same register snapshot.
@@ -288,10 +294,30 @@ void readMPU() {
   mpuTemp = imuIdentity==0x70 ? rt/333.87+21.0 : rt/340.0+36.53;
 
   float dx=ax-baseAx,dy=ay-baseAy,dz=az-baseAz;
-  vibration=sqrtf(dx*dx+dy*dy+dz*dz);
+  float magnitude=sqrtf(ax*ax+ay*ay+az*az);
+  vibration=fabsf(magnitude-1.0f); // exclude static tilt from vibration magnitude
+  filteredAx += .2f*(ax-filteredAx);filteredAy += .2f*(ay-filteredAy);filteredAz += .2f*(az-filteredAz);
+  float baseNorm=sqrtf(baseAx*baseAx+baseAy*baseAy+baseAz*baseAz);
+  float filteredNorm=sqrtf(filteredAx*filteredAx+filteredAy*filteredAy+filteredAz*filteredAz);
+  if(imuCalibrated && baseNorm>.1f && filteredNorm>.1f){float cosine=(baseAx*filteredAx+baseAy*filteredAy+baseAz*filteredAz)/(baseNorm*filteredNorm);cosine=fmaxf(-1,fminf(1,cosine));tiltDeg=acosf(cosine)*180.0f/PI;}
+  else tiltDeg=0;
   float rx=gx-baseGx,ry=gy-baseGy,rz=gz-baseGz;
   rotation=sqrtf(rx*rx+ry*ry+rz*rz);
-  movementDetected=mpuOK && (vibration>MOTION_DETECT_G || rotation>MOTION_DETECT_DPS);
+  movementDetected=mpuOK && imuCalibrated && (vibration>MOTION_DETECT_G || rotation>MOTION_DETECT_DPS);
+}
+
+void recoverCalibration() {
+  static int count=0;
+  static double sx=0,sy=0,sz=0,sgx=0,sgy=0,sgz=0;
+  static float lastAx=0,lastAy=0,lastAz=0;
+  if(imuCalibrated)return;
+  float norm=sqrtf(ax*ax+ay*ay+az*az);
+  bool stable=mpuOK && !driver1State && !driver2State && norm>.75 && norm<1.25 && fabsf(gx)<15 && fabsf(gy)<15 && fabsf(gz)<15;
+  if(count && (fabsf(ax-lastAx)+fabsf(ay-lastAy)+fabsf(az-lastAz)>.1))stable=false;
+  lastAx=ax;lastAy=ay;lastAz=az;
+  if(!stable){count=0;sx=sy=sz=sgx=sgy=sgz=0;return;}
+  sx+=ax;sy+=ay;sz+=az;sgx+=gx;sgy+=gy;sgz+=gz;
+  if(++count>=30){baseAx=sx/count;baseAy=sy/count;baseAz=sz/count;baseGx=sgx/count;baseGy=sgy/count;baseGz=sgz/count;filteredAx=baseAx;filteredAy=baseAy;filteredAz=baseAz;imuCalibrated=true;tiltDeg=0;Serial.println("IMU recovery baseline ready. Reset latch when safe; motors stay OFF.");}
 }
 
 // =============== TEMPERATURE UPDATES ===========
@@ -337,8 +363,8 @@ void criticalShutdown(String reason) {
 }
 
 void evaluateSafety() {
-  if (millis() > 5000 && (!t1OK || !t2OK || !mpuOK || millis()-lastGoodTemp > 5000)) {
-    criticalShutdown(!mpuOK ? "Shared MPU sensor fault: both motors" : !t1OK ? "Motor 1 temperature sensor fault" : !t2OK ? "Motor 2 temperature sensor fault" : "Temperature samples stale");
+  if (millis() > 5000 && (!t1OK || !t2OK || !mpuOK || !imuCalibrated || millis()-lastGoodTemp > 5000)) {
+    criticalShutdown((!mpuOK || !imuCalibrated) ? "Shared IMU fault or baseline missing: restart with sensor still" : !t1OK ? "Motor 1 temperature sensor fault" : !t2OK ? "Motor 2 temperature sensor fault" : "Temperature samples stale");
   }
   bool tempCritical =
     (t1OK && t1 >= TEMP_CRITICAL_C) ||
@@ -349,12 +375,10 @@ void evaluateSafety() {
     (t2OK && t2 >= TEMP_WARNING_C);
 
   bool motionWarning =
-    vibration >= VIB_WARNING ||
-    rotation >= ROT_WARNING;
+    imuCalibrated && tiltDeg >= TILT_WARNING_DEG;
 
   bool motionCritical =
-    vibration >= VIB_CRITICAL ||
-    rotation >= ROT_CRITICAL;
+    imuCalibrated && tiltDeg >= TILT_CRITICAL_DEG;
 
   if (motionWarning) { if (warningMotionSamples < 3) warningMotionSamples++; }
   else warningMotionSamples = 0;
@@ -365,7 +389,7 @@ void evaluateSafety() {
   if (tempCritical) {
     criticalShutdown(t1OK && t1 >= TEMP_CRITICAL_C ? "Motor 1 temperature critical" : "Motor 2 temperature critical");
   } else if (criticalMotionSamples >= 4) {
-    criticalShutdown("Excessive movement/vibration");
+    criticalShutdown("Shared IMU tilt reached critical limit");
   }
 
   if (criticalLock) {
@@ -375,7 +399,7 @@ void evaluateSafety() {
     statusText = "WARNING";
     warningText = tempWarning
       ? (t1OK && t1 >= TEMP_WARNING_C ? "Motor 1 temperature warning" : "Motor 2 temperature warning")
-      : "High movement/vibration";
+      : "Shared IMU tilt warning";
   } else if (!t1OK || !t2OK || !mpuOK) {
     statusText = "WARNING";
     warningText = "Check sensor connection";
@@ -408,7 +432,7 @@ void handleCommand() {
   }
 
   bool starts = c == "M1F" || c == "M1R" || c == "M2F" || c == "M2R";
-  if (starts && (!t1OK || !t2OK || !mpuOK || t1 >= TEMP_WARNING_C || t2 >= TEMP_WARNING_C || vibration >= VIB_WARNING || rotation >= ROT_WARNING)) {
+  if (starts && (!t1OK || !t2OK || !mpuOK || !imuCalibrated || t1 >= TEMP_WARNING_C || t2 >= TEMP_WARNING_C || tiltDeg >= TILT_WARNING_DEG)) {
     server.send(409,"text/plain","Start blocked: sensors must be healthy and below warning limits"); return;
   }
   if (c == "M1F") m1Forward();
@@ -444,8 +468,7 @@ void handleCommand() {
       (t2OK && t2 < TEMP_RESET_C);
 
     bool motionSafe =
-      vibration < VIB_WARNING &&
-      rotation < ROT_WARNING;
+      imuCalibrated && tiltDeg < TILT_WARNING_DEG;
 
     if (!tempSafe || !motionSafe || !mpuOK) {
       server.send(409, "text/plain",
@@ -471,6 +494,13 @@ void handleCommand() {
 // =============== LIVE DATA API =================
 void handleAPI() {
   String j = "{";
+  j += "\"tilt_deg\":" + String(tiltDeg,2) + ",";
+  j += "\"tilt_warning\":" + String(TILT_WARNING_DEG,1) + ",";
+  j += "\"tilt_critical\":" + String(TILT_CRITICAL_DEG,1) + ",";
+  j += "\"imu_calibrated\":" + String(imuCalibrated?"true":"false") + ",";
+  j += "\"pwm_warning\":" + String(PWM_WARNING) + ",";
+  j += "\"pwm_critical\":" + String(PWM_CRITICAL) + ",";
+  j += "\"wifi_rssi\":" + String(WiFi.RSSI()) + ",";
   j += "\"movement_detected\":" + String(mpuOK && movementDetected ? "true":"false") + ",";
   j += "\"runtime1_hours\":" + String((double)runtimeMs1/3600000.0,6) + ",";
   j += "\"runtime2_hours\":" + String((double)runtimeMs2/3600000.0,6) + ",";
@@ -527,7 +557,7 @@ void serviceSensors() {
   accountRuntime();
   updateTemperatures();
   unsigned long now=millis();
-  if(now-lastMPU>=100){lastMPU=now;readMPU();sampleSequence++;evaluateSafety();}
+  if(now-lastMPU>=100){lastMPU=now;readMPU();recoverCalibration();sampleSequence++;evaluateSafety();}
 }
 
 // NetworkClient may accept fewer bytes than requested. Advance only by bytes
@@ -560,6 +590,7 @@ void serveAsset(const uint8_t *bytes, size_t length, const char *mime, bool cach
 // =============== SETUP =========================
 void setup() {
   Serial.begin(115200);
+  Serial.printf("Boot reset reason: %d; free heap: %u\n",(int)esp_reset_reason(),ESP.getFreeHeap());
   delay(700);
 
   pinMode(ENA, OUTPUT);
@@ -587,7 +618,8 @@ void setup() {
     Serial.println("Keep shared IMU still: baseline calibration, motors OFF.");
     double sx=0,sy=0,sz=0,sgx=0,sgy=0,sgz=0;int samples=0;
     for(int i=0;i<100;i++){readMPU();if(!mpuOK)break;sx+=ax;sy+=ay;sz+=az;sgx+=gx;sgy+=gy;sgz+=gz;samples++;delay(10);}
-    if(samples==100){baseAx=sx/samples;baseAy=sy/samples;baseAz=sz/samples;baseGx=sgx/samples;baseGy=sgy/samples;baseGz=sgz/samples;readMPU();Serial.println("IMU baseline stored for this boot.");}
+    float baselineNorm=sqrt(sx*sx+sy*sy+sz*sz)/(samples?samples:1);
+    if(samples==100 && baselineNorm>.75 && baselineNorm<1.25){baseAx=sx/samples;baseAy=sy/samples;baseAz=sz/samples;baseGx=sgx/samples;baseGy=sgy/samples;baseGz=sgz/samples;filteredAx=baseAx;filteredAy=baseAy;filteredAz=baseAz;imuCalibrated=true;readMPU();Serial.println("IMU baseline stored for this boot.");}
     else {mpuOK=false;criticalShutdown("IMU baseline failed; restart with sensor connected");}
   }
 
@@ -597,6 +629,9 @@ void setup() {
   WiFi.mode(WIFI_STA);
   WiFi.setSleep(false);
   WiFi.setAutoReconnect(true);
+  WiFi.onEvent([](WiFiEvent_t event, WiFiEventInfo_t info){
+    if(event==ARDUINO_EVENT_WIFI_STA_DISCONNECTED)Serial.printf("Wi-Fi disconnect reason: %u\n",info.wifi_sta_disconnected.reason);
+  });
   WiFi.begin(WIFI_NAME,WIFI_PASSWORD);
   Serial.println("Connecting to configured Wi-Fi. Dashboard IP prints when connected.");
 
@@ -604,7 +639,14 @@ void setup() {
     serveAsset(PAGE_GZ,sizeof(PAGE_GZ),"text/html; charset=utf-8",false);
   });
 
-  server.on("/three-r128.js", HTTP_GET, [](){serveAsset(THREE_GZ,sizeof(THREE_GZ),"application/javascript",true);});
+  server.on("/three-part", HTTP_GET, [](){
+    String raw=server.arg("i");
+    if(!raw.length()){server.send(400,"text/plain","Missing index");return;}
+    for(unsigned i=0;i<raw.length();i++)if(!isDigit(raw[i])){server.send(400,"text/plain","Invalid index");return;}
+    int index=raw.toInt();
+    if(index<0 || index>=THREE_PART_COUNT){server.send(404,"text/plain","Unknown part");return;}
+    serveAsset(THREE_PARTS[index],THREE_PART_SIZES[index],"application/octet-stream",false);
+  });
   server.on("/api", HTTP_GET, handleAPI);
   const char* headers[] = {"Origin"};
   server.collectHeaders(headers, 1);

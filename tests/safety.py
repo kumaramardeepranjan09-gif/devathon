@@ -17,22 +17,26 @@ void stopAll(){stopped=true;}
 void driver1(bool b){r1=b;} void driver2(bool b){r2=b;}
 void logEvent(String){}
 float t1=28,t2=28,vibration=0,rotation=0;
+float tiltDeg=0;bool imuCalibrated=true;
+const float TILT_WARNING_DEG=45,TILT_CRITICAL_DEG=75;
 bool t1OK=true,t2OK=true,mpuOK=true,criticalLock=false;
 String criticalReason,statusText,warningText;
 int warningMotionSamples=0,criticalMotionSamples=0;
-const float TEMP_WARNING_C=32,TEMP_CRITICAL_C=36,VIB_WARNING=.25,VIB_CRITICAL=.7,ROT_WARNING=30,ROT_CRITICAL=90;
-void clean(){t1=t2=28;vibration=rotation=0;t1OK=t2OK=mpuOK=true;criticalLock=false;criticalReason="";warningMotionSamples=criticalMotionSamples=0;stopped=buzzer=false;r1=r2=true;lastGoodTemp=clockMs;}
+const float TEMP_WARNING_C=31,TEMP_CRITICAL_C=34,VIB_WARNING=.25,VIB_CRITICAL=.7,ROT_WARNING=30,ROT_CRITICAL=90;
+void clean(){tiltDeg=0;imuCalibrated=true;t1=t2=28;vibration=rotation=0;t1OK=t2OK=mpuOK=true;criticalLock=false;criticalReason="";warningMotionSamples=criticalMotionSamples=0;stopped=buzzer=false;r1=r2=true;lastGoodTemp=clockMs;}
 '''
 tests=r'''
 int main(){
 clean();evaluateSafety();assert(statusText=="NORMAL");
-t1=32;evaluateSafety();assert(statusText=="WARNING" && warningText.find("Motor 1")!=String::npos && !criticalLock);
-t1=28;t2=36;evaluateSafety();assert(criticalLock && stopped && !r1 && !r2 && buzzer);assert(criticalReason.find("Motor 2")!=String::npos);
+t1=31;evaluateSafety();assert(statusText=="WARNING" && warningText.find("Motor 1")!=String::npos && !criticalLock);
+t1=28;t2=34;evaluateSafety();assert(criticalLock && stopped && !r1 && !r2 && buzzer);assert(criticalReason.find("Motor 2")!=String::npos);
 t2=28;evaluateSafety();assert(criticalLock && buzzer);
 clean();t1OK=false;evaluateSafety();assert(criticalLock && stopped && criticalReason.find("Motor 1")!=String::npos);
 clean();mpuOK=false;evaluateSafety();assert(criticalLock && !r1 && !r2);
-clean();vibration=.8;for(int i=0;i<3;i++)evaluateSafety();assert(!criticalLock);evaluateSafety();assert(criticalLock);
-clean();rotation=35;for(int i=0;i<3;i++)evaluateSafety();assert(statusText=="WARNING" && !criticalLock);
+clean();tiltDeg=75;for(int i=0;i<3;i++)evaluateSafety();assert(!criticalLock);evaluateSafety();assert(criticalLock);
+clean();tiltDeg=45;for(int i=0;i<3;i++)evaluateSafety();assert(statusText=="WARNING" && !criticalLock);
+clean();vibration=.8;rotation=100;evaluateSafety();assert(!criticalLock);
+clean();imuCalibrated=false;evaluateSafety();assert(criticalLock);
 clean();lastGoodTemp=0;evaluateSafety();assert(criticalLock);
 std::cout<<"PASS: actual firmware temperature boundaries, motor attribution, critical stop/latch/buzzer, missing sensors, stale temperatures, motion persistence\n";
 }

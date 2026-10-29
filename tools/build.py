@@ -21,7 +21,11 @@ libs='<script>\n'+(root/'web/vendor/three.min.js').read_text()+'\n</script><scri
 p=p.replace('<script>\n\'use strict\';',libs+'\n<!-- TRANSPORT -->\n<script>\n\'use strict\';')
 p=p.replace('</html>', '<script>\n'+(root/'web/dashboard-upgrade.js').read_text()+'\n'+(root/'web/monitoring.js').read_text()+'\n</script></html>')
 three_source=(root/'web/vendor/three.min.js').read_text()
-hardware=p.replace('<!-- TRANSPORT -->','').replace('<script>\n'+three_source+'\n</script>', '<script src="/three-r128.js"></script>')
+parts=[three_source[i:i+8192] for i in range(0,len(three_source),8192)]
+hash_value=2166136261
+for byte in three_source.encode(): hash_value=((hash_value^byte)*16777619)&0xffffffff
+loader=(root/'web/asset-loader.js').read_text().replace('__PARTS__',str(len(parts))).replace('__HASH__',str(hash_value))
+hardware=p.replace('<!-- TRANSPORT -->','').replace('<script>\n'+three_source+'\n</script>', '<script>\n'+loader+'\n</script>')
 demo=p.replace('<!-- TRANSPORT -->','<script>\n'+(root/'web/demo.js').read_text()+'\n</script>')
 demo=demo.replace('SMARTPREDICT / LIVE STATION','SMARTPREDICT / DEMO STUDIO').replace('Independent temperatures · Shared motion · Local protection','SIMULATED READINGS · No ESP32 required · No hardware commands')
 demo=demo.replace('<div class="toolbar"><div><label for="address">', '<div class="toolbar"><div hidden><label for="address">')
@@ -33,7 +37,11 @@ def embed(name, content):
     compressed=bytearray(gzip.compress(content.encode(),mtime=0));compressed[9]=255
     return 'const uint8_t '+name+'[] PROGMEM = {\n'+'\n'.join(','.join(str(b) for b in compressed[i:i+24])+',' for i in range(0,len(compressed),24))+'\n};',len(compressed)
 page_array,page_size=embed('PAGE_GZ',hardware)
-three_array,three_size=embed('THREE_GZ',three_source)
-s=s.replace('/* EMBEDDED_DASHBOARD */',page_array+'\n'+three_array)
+arrays=[];sizes=[]
+for i,part in enumerate(parts):
+    array,size=embed('THREE_PART_'+str(i),part);arrays.append(array);sizes.append(size)
+index='const int THREE_PART_COUNT='+str(len(parts))+';\nconst uint8_t* const THREE_PARTS[]={'+','.join('THREE_PART_'+str(i) for i in range(len(parts)))+'};\nconst size_t THREE_PART_SIZES[]={'+','.join(map(str,sizes))+'};'
+s=s.replace('/* EMBEDDED_DASHBOARD */',page_array+'\n'+'\n'.join(arrays)+'\n'+index)
+three_size=sum(sizes)
 (root/'SmartPredict_ESP32/SmartPredict_ESP32.ino').write_text(s)
 print(f'Built single-file firmware: HTML {page_size} bytes; cacheable Three.js {three_size} bytes')
