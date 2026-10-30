@@ -442,6 +442,9 @@ void handleCommand() {
   if (starts && (!t1OK || !t2OK || !mpuOK || !imuCalibrated || t1 >= TEMP_WARNING_C || t2 >= TEMP_WARNING_C || tiltDeg >= TILT_WARNING_DEG)) {
     server.send(409,"text/plain","Start blocked: sensors must be healthy and below warning limits"); return;
   }
+  if (starts && ((c.startsWith("M1") && speed1 == 0) || (c.startsWith("M2") && speed2 == 0))) {
+    server.send(409,"text/plain","Start blocked: PWM is 0; set a nonzero speed before starting"); return;
+  }
   if (c == "M1F") m1Forward();
   else if (c == "M1R") m1Reverse();
   else if (c == "M1S") stopM1();

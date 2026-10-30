@@ -44,7 +44,7 @@ Search these constants near the top of the `.ino`, edit, Verify and upload:
 | `PWM_WARNING` | 204 / 255 (80%) | Commanded-speed advisory warning |
 | `PWM_CRITICAL` | 242 / 255 (~95%) | Commanded-speed critical advisory alert |
 | `SERVICE_BUDGET_MINUTES` | 200 min | Maintenance budget |
-| `MOTION_DETECT_G` / `MOTION_DETECT_DPS` | 0.18 g / 12°/s | Shared movement detector for animation |
+| `MOTION_DETECT_G` / `MOTION_DETECT_DPS` | 0.18 g / 12°/s | Shared movement telemetry detector |
 
 Tilt is the angle between the low-pass filtered acceleration vector and the still reference acquired at boot (not yaw). Linear acceleration can influence this estimate; validate with a known angle at rest. Static tilt no longer feeds the acceleration-magnitude vibration alarm. The current protection policy uses temperature, tilt and sensor faults; vibration/gyro values remain monitoring and movement signals. The initial mount must be still. Recovery can collect a new reference only with both drivers off; fault reset remains manual.
 
@@ -52,7 +52,7 @@ PWM alerts are **not measured RPM** and do not independently shut down the motor
 
 ## 3D and movement limits
 
-Detailed 3D models follow reported direction and PWM only when the motor command is active AND the shared IMU detects movement. They pause on stop, zero PWM, fault, missing movement, stale telemetry or disconnect. An independent watchdog stops animation when no fresh sample arrives.
+Detailed 3D models follow reported direction and PWM only when the motor command is active with nonzero PWM. They pause on stop, zero PWM, fault, stale telemetry or disconnect. An independent watchdog stops animation when no fresh sample arrives.
 
 **One shared IMU cannot verify each motor shaft.** A smooth running motor may not exceed the movement threshold; vibration from the other motor or external shaking may trigger the detector. Real independent shaft confirmation/RPM requires an encoder or Hall sensor per motor. No actual RPM or individual vibration is fabricated.
 
@@ -98,7 +98,7 @@ The connection panel includes **Retry connection** and Wi-Fi signal strength whe
 
 Graphs retain the correct tilt series and units after resizing and changing time ranges. Temperature lines use coral (Motor 1) and blue (Motor 2), motion green and tilt purple; dashed lines mark limits. Thresholds remain **31°C warning / 34°C critical**, **45° tilt warning / 75° critical**, and **200 minutes commanded run-time service allowance**.
 
-The model stops for stopped/zero-PWM output, a critical latch, missing shared movement, or stale/offline telemetry. Shared IMU movement plus commanded PWM is only an animation estimate: one IMU cannot confirm independent shaft movement or RPM. Add an encoder/Hall sensor per motor for measured rotation.
+The model stops for stopped/zero-PWM output, a critical latch, stale/offline telemetry. Reported driver state plus commanded PWM is only an animation estimate: one IMU cannot confirm independent shaft movement or RPM. Add an encoder/Hall sensor per motor for measured rotation.
 
 Additional UI regression check: `node tests/design.cjs` (Playwright and Chromium required). It checks separate downloadable reports, chart images, connection recovery messages, PWM percentage and tilt charts after viewport changes.
 
@@ -117,3 +117,11 @@ Generated work orders can be reopened from Maintenance Reports (latest 30 in the
 ### Audible protection
 
 An active buzzer on GPIO23 sounds once for approximately 200 ms when the system enters a warning episode. It does not repeat while that warning remains active. Returning to normal rearms the next warning beep. Critical temperature, persistent critical tilt or sensor/stale-data faults stop both drivers and latch the buzzer continuously until a safe manual reset. Reset never restarts motors. Dashboard motor cards no longer repeat threshold notes or commanded-PWM text; engineering details remain in reports/settings.
+
+### Motor start and model synchronization
+
+Each model follows its own fresh ESP32 driver state, direction and nonzero PWM, independently of the shared IMU movement flag. Stop, zero PWM, critical lock and lost/stale telemetry stop animation. The model shows reported output, not measured shaft rotation or external supply voltage; independent physical feedback needs an encoder/Hall sensor or suitable isolated power sensing per motor.
+
+The digital twin exposes both slider and numeric PWM controls. If Motor 2 reports FORWARD but does not move, check its PWM is above zero, then check ENB GPIO14, IN3 GPIO18, IN4 GPIO19, OUT3/OUT4, motor supply and common ground with motor power disconnected. Do not bypass protection: resolve sensor/temperature/tilt faults and manually reset first.
+
+Motor starts with zero PWM are rejected with a clear message. The live dashboard confirms start against fresh ESP32 driver, direction and PWM telemetry and reports an unconfirmed start instead of treating HTTP OK as proof of output. Run `node tests/live-command.cjs` for live HTTP command routing and acknowledgement regression coverage. Regenerate and upload the updated sketch to update the dashboard served by the ESP32, then hard-refresh the browser.
