@@ -127,3 +127,7 @@ Manual PWM slider and numeric controls are hidden from the digital twin. If Moto
 Motor starts with zero PWM are rejected with a clear message. The live dashboard confirms start against fresh ESP32 driver, direction and PWM telemetry and reports an unconfirmed start instead of treating HTTP OK as proof of output. Run `node tests/live-command.cjs` for live HTTP command routing and acknowledgement regression coverage. Regenerate and upload the updated sketch to update the dashboard served by the ESP32, then hard-refresh the browser.
 
 Fault Alerts and the notification centre preserve the detected reason and sensor evidence at event time, including temperature/tilt thresholds, missing sensors, calibration, firmware safety-latch reasons and connection/command errors. These identify the reported protection trigger; physical root causes such as wiring damage or a stalled shaft require hardware inspection.
+
+### Clear sensor graphs
+
+Overview and Sensor Trends share high-DPI plots with readable time/value axes, teal/violet motor traces, labelled warning/critical limits, valid-data gaps and latest-reading/range summaries. Hover or touch a chart to inspect values; keyboard users can focus it and use Left/Right, Home/End and Escape. Empty/invalid data and offline history are labelled. No external chart assets or network dependencies are added. Run `node tests/trends.cjs` for chart edge cases, keyboard navigation and mobile layout. Design guidance: [frontend-design](https://github.com/anthropics/skills/blob/main/skills/frontend-design/SKILL.md).
