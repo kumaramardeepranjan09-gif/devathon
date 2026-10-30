@@ -1,0 +1,21 @@
+const {chromium}=require('playwright');
+const assert=require('node:assert/strict'),http=require('node:http'),fs=require('node:fs');
+const server=http.createServer((q,r)=>{r.setHeader('Content-Type','text/html');r.end(fs.readFileSync('demo.html'));});
+(async()=>{await new Promise(r=>server.listen(8098,'127.0.0.1',r));const browser=await chromium.launch({executablePath:'/usr/bin/chromium',args:['--no-sandbox','--enable-unsafe-swiftshader']});try{
+ const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.goto('http://127.0.0.1:8098');await page.waitForFunction(()=>online);await page.waitForTimeout(1300);
+ assert.match(await page.title(),/Anuraksana/);assert.equal(await page.locator('#referenceOverview').isVisible(),true);
+ assert.match(await page.locator('#fleetStatus').textContent(),/OPTIMAL/);
+ const expected=await page.evaluate(()=>Math.round(Math.max(0,Math.min(100,(1-data.runtime1_hours/data.service_budget_hours)*100))));
+ assert.equal(await page.locator('#pickMotor1 strong').textContent(),expected+'%');
+ await page.screenshot({path:'/tmp/anuraksana-desktop.png',fullPage:true});
+ await page.locator('[data-page="settings"]').click();await page.getByRole('button',{name:'Motor 2 critical',exact:true}).click();
+ await page.waitForFunction(()=>data.critical);assert.match(await page.locator('#fleetStatus').textContent(),/ATTENTION/);
+ await page.getByRole('button',{name:'Disconnect',exact:true}).click();await page.waitForFunction(()=>!online);
+ await page.locator('[data-page="overview"]').click();assert.equal(await page.locator('#referenceAverage').textContent(),'—');assert.match(await page.locator('#fleetStatus').textContent(),/OFFLINE/);
+ await page.locator('[data-page="settings"]').click();await page.getByRole('button',{name:'Healthy / recover',exact:true}).click();await page.waitForFunction(()=>online&&!data.critical);
+ await page.locator('[data-page="overview"]').click();await page.setViewportSize({width:390,height:844});await page.waitForTimeout(1300);
+ assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.screenshot({path:'/tmp/anuraksana-mobile.png',fullPage:true});
+ await page.emulateMedia({reducedMotion:'reduce'});assert.equal(await page.locator('.live-dot').evaluate(e=>getComputedStyle(e).animationName),'none');
+ assert.deepEqual(errors,[]);console.log('PASS reference layout, service telemetry, critical/offline/recovery states, mobile, reduced motion, no JS errors');
+ }finally{await browser.close();server.close();}})().catch(e=>{console.error(e);process.exitCode=1;server.close();});
